@@ -70,6 +70,92 @@ def parse_month_year(month_input: str, current_year: int = None) -> tuple:
     return start_date, end_date
 
 
+def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selected_month_coverage):
+    """Calculate quarterly trend for savings plan coverage.
+    
+    Args:
+        month_two_coverage: Coverage data for month -2 (oldest)
+        month_one_coverage: Coverage data for month -1 (middle)
+        selected_month_coverage: Coverage data for selected month (newest)
+    
+    Returns:
+        Dictionary containing trend analysis
+    """
+    # Extract coverage percentages
+    coverage_values = []
+    coverage_labels = []
+    
+    for month_data, label in [
+        (month_two_coverage, "Month -2"),
+        (month_one_coverage, "Month -1"), 
+        (selected_month_coverage, "Selected Month")
+    ]:
+        if month_data and 'average_coverage_percentage' in month_data:
+            coverage_values.append(month_data['average_coverage_percentage'])
+            coverage_labels.append(label)
+        else:
+            coverage_values.append(0.0)
+            coverage_labels.append(f"{label} (No Data)")
+    
+    # Calculate trend
+    trend_analysis = {
+        'coverage_values': coverage_values,
+        'coverage_labels': coverage_labels,
+        'trend_direction': 'stable',
+        'trend_strength': 'none',
+        'quarterly_change': 0.0,
+        'month_to_month_changes': []
+    }
+    
+    # Calculate month-to-month changes
+    for i in range(1, len(coverage_values)):
+        if coverage_values[i-1] > 0 and coverage_values[i] > 0:
+            change = coverage_values[i] - coverage_values[i-1]
+            trend_analysis['month_to_month_changes'].append({
+                'from_month': coverage_labels[i-1],
+                'to_month': coverage_labels[i],
+                'change': round(change, 2)
+            })
+    
+    # Calculate overall quarterly change (oldest to newest)
+    if coverage_values[0] > 0 and coverage_values[2] > 0:
+        quarterly_change = coverage_values[2] - coverage_values[0]
+        trend_analysis['quarterly_change'] = round(quarterly_change, 2)
+        
+        # Determine trend direction and strength
+        abs_change = abs(quarterly_change)
+        
+        if abs_change < 2.0:
+            trend_analysis['trend_direction'] = 'stable'
+            trend_analysis['trend_strength'] = 'minimal'
+        elif quarterly_change > 0:
+            trend_analysis['trend_direction'] = 'increasing'
+            if abs_change > 10.0:
+                trend_analysis['trend_strength'] = 'strong'
+            elif abs_change > 5.0:
+                trend_analysis['trend_strength'] = 'moderate'
+            else:
+                trend_analysis['trend_strength'] = 'weak'
+        else:
+            trend_analysis['trend_direction'] = 'decreasing'
+            if abs_change > 10.0:
+                trend_analysis['trend_strength'] = 'strong'
+            elif abs_change > 5.0:
+                trend_analysis['trend_strength'] = 'moderate'
+            else:
+                trend_analysis['trend_strength'] = 'weak'
+    
+    # Add summary message
+    if trend_analysis['trend_direction'] == 'stable':
+        trend_analysis['summary'] = f"Savings Plan coverage has remained stable over the quarter with minimal change ({trend_analysis['quarterly_change']:.1f}%)"
+    elif trend_analysis['trend_direction'] == 'increasing':
+        trend_analysis['summary'] = f"Savings Plan coverage is trending upward with a {trend_analysis['trend_strength']} increase of {trend_analysis['quarterly_change']:.1f}% over the quarter"
+    else:
+        trend_analysis['summary'] = f"Savings Plan coverage is trending downward with a {trend_analysis['trend_strength']} decrease of {abs(trend_analysis['quarterly_change']):.1f}% over the quarter"
+    
+    return trend_analysis
+
+
 
 @click.command()
 @click.option('--month', '-m', 
@@ -107,8 +193,8 @@ def cli(month, output, profile, region):
     click.echo(f"Output file: {output}")
     
     try:
-        # Initialize AWS Cost Explorer client
-        parameters = {
+        # Initialize AWS Cost Explorer client parameters for 3-month analysis
+        parameters_selected_month = {
             "start_date": start_date,
             "end_date": end_date
         }
@@ -128,25 +214,58 @@ def cli(month, output, profile, region):
             "start_date": month_two_start,
             "end_date": month_two_end
         }
-        cost_client = CostExplorerClient(profile=profile, region=region, parameters=parameters)
+        
+        # Create 3 Cost Explorer clients for trend analysis
+        cost_client_selected_month = CostExplorerClient(profile=profile, region=region, parameters=parameters_selected_month)
+        cost_client_month_one = CostExplorerClient(profile=profile, region=region, parameters=parameters_previous_month_one)
+        cost_client_month_two = CostExplorerClient(profile=profile, region=region, parameters=parameters_previous_month_two)
         
         # Report raw_data
         report_raw_data = []
 
-        # Fetch cost data
+        # Fetch cost data for selected month
         click.echo("Fetching cost data from AWS Cost Explorer...")
-        cost_data = cost_client.get_cost_and_usage()
+        cost_data = cost_client_selected_month.get_cost_and_usage()
         report_raw_data.append(cost_data)
 
-        # Fetch total savings
+        # Fetch total savings for selected month
         click.echo("Fetching total savings from AWS Cost Explorer...")
-        total_savings = cost_client.get_total_savings()
+        total_savings = cost_client_selected_month.get_total_savings()
         report_raw_data.append(total_savings)
 
-        # Fetch saving plan coverage 
-        click.echo("Fetching saving plan coverage from AWS Cost Explorer...")
-        sp_coverage = cost_client.get_saving_plan_coverage()
-        report_raw_data.append(sp_coverage)
+        # Fetch saving plan coverage for 3-month trend analysis
+        click.echo("Fetching savings plan coverage for 3-month trend analysis...")
+        
+        click.echo("  - Fetching coverage for selected month...")
+        sp_coverage_selected = cost_client_selected_month.get_saving_plan_coverage()
+        
+        click.echo("  - Fetching coverage for month -1...")
+        sp_coverage_month_one = cost_client_month_one.get_saving_plan_coverage()
+        
+        click.echo("  - Fetching coverage for month -2...")
+        sp_coverage_month_two = cost_client_month_two.get_saving_plan_coverage()
+        
+        # Calculate quarterly trend
+        click.echo("Calculating quarterly savings plan trend...")
+        sp_trend_analysis = calculate_savings_plan_trend(
+            sp_coverage_month_two, 
+            sp_coverage_month_one, 
+            sp_coverage_selected
+        )
+        
+        # Add coverage data and trend analysis to report
+        sp_coverage_with_trend = {
+            'selected_month': sp_coverage_selected,
+            'month_minus_one': sp_coverage_month_one,
+            'month_minus_two': sp_coverage_month_two,
+            'trend_analysis': sp_trend_analysis
+        }
+        report_raw_data.append(sp_coverage_with_trend)
+
+        # Fetch RDS coverage data for selected month
+        click.echo("Fetching RDS Reserved Instance coverage...")
+        rds_coverage = cost_client_selected_month.get_RDS_coverage()
+        report_raw_data.append(rds_coverage)
 
         # Print console report
         print_console_report(report_raw_data, start_date, end_date)

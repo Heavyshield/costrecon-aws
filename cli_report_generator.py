@@ -11,10 +11,14 @@ def print_console_report(report_data, start_date, end_date):
     click.echo(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
     click.echo("="*80)
     
-    # Parse report data (expecting list with cost_data, total_savings, sp_coverage)
+    # Parse report data (expecting list with cost_data, total_savings, sp_coverage_with_trend, rds_coverage)
     cost_data = report_data[0] if len(report_data) > 0 else {}
     total_savings = report_data[1] if len(report_data) > 1 else {}
-    sp_coverage = report_data[2] if len(report_data) > 2 else {}
+    sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
+    rds_coverage = report_data[3] if len(report_data) > 3 else {}
+    
+    # Extract current month coverage for backward compatibility
+    sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
     
     # Cost Summary
     click.echo("\n📊 COST SUMMARY")
@@ -78,7 +82,7 @@ def print_console_report(report_data, start_date, end_date):
     
     if 'average_coverage_percentage' in sp_coverage:
         coverage_pct = sp_coverage.get('average_coverage_percentage', 0)
-        click.echo(f"Average Coverage: {coverage_pct:.1f}%")
+        click.echo(f"Current Month Coverage: {coverage_pct:.1f}%")
         
         if coverage_pct < 70:
             click.echo("  ⚠️  Coverage below recommended 70% threshold")
@@ -86,6 +90,83 @@ def print_console_report(report_data, start_date, end_date):
             click.echo("  ✅ Excellent coverage!")
         else:
             click.echo("  ✅ Good coverage")
+    
+    # Quarterly Trend Analysis
+    if sp_coverage_with_trend and 'trend_analysis' in sp_coverage_with_trend:
+        trend_data = sp_coverage_with_trend['trend_analysis']
+        
+        click.echo("\n📊 3-MONTH SAVINGS PLAN TREND")
+        click.echo("-" * 40)
+        
+        # Display coverage values for all 3 months
+        coverage_values = trend_data.get('coverage_values', [])
+        coverage_labels = trend_data.get('coverage_labels', [])
+        
+        if len(coverage_values) == 3:
+            click.echo("Monthly Coverage Progression:")
+            for i, (label, value) in enumerate(zip(coverage_labels, coverage_values)):
+                arrow = ""
+                if i > 0 and coverage_values[i-1] > 0 and value > 0:
+                    change = value - coverage_values[i-1]
+                    if change > 1.0:
+                        arrow = " ↗️"
+                    elif change < -1.0:
+                        arrow = " ↘️"
+                    else:
+                        arrow = " ➡️"
+                click.echo(f"  • {label:<15} {value:>6.1f}%{arrow}")
+        
+        # Display trend summary
+        click.echo(f"\nQuarterly Change: {trend_data.get('quarterly_change', 0):.1f}%")
+        click.echo(f"Trend Direction: {trend_data.get('trend_direction', 'unknown').title()}")
+        click.echo(f"Trend Strength: {trend_data.get('trend_strength', 'unknown').title()}")
+        
+        # Display trend summary message
+        summary = trend_data.get('summary', '')
+        if summary:
+            click.echo(f"\n💡 Trend Analysis:")
+            click.echo(f"   {summary}")
+        
+        # Month-to-month changes
+        month_changes = trend_data.get('month_to_month_changes', [])
+        if month_changes:
+            click.echo(f"\nMonth-to-Month Changes:")
+            for change in month_changes:
+                direction = "↗️" if change['change'] > 0 else "↘️" if change['change'] < 0 else "➡️"
+                click.echo(f"  • {change['from_month']} → {change['to_month']}: {change['change']:+.1f}% {direction}")
+    else:
+        click.echo("\n📊 3-MONTH SAVINGS PLAN TREND")
+        click.echo("-" * 40)
+        click.echo("Trend analysis not available - insufficient data")
+    
+    # RDS Coverage Summary
+    click.echo("\n🗄️  RDS RESERVED INSTANCES COVERAGE")
+    click.echo("-" * 40)
+    
+    if rds_coverage and 'average_hours_coverage_percentage' in rds_coverage:
+        hours_coverage = rds_coverage.get('average_hours_coverage_percentage', 0)
+        cost_coverage = rds_coverage.get('average_cost_coverage_percentage', 0)
+        utilization = rds_coverage.get('average_utilization_percentage', 0)
+        
+        click.echo(f"Hours Coverage: {hours_coverage:.1f}%")
+        click.echo(f"Cost Coverage: {cost_coverage:.1f}%")
+        click.echo(f"Utilization Rate: {utilization:.1f}%")
+        
+        if hours_coverage < 50:
+            click.echo("  ⚠️  Low RDS Reserved Instance coverage - consider purchasing RIs")
+        elif hours_coverage >= 80:
+            click.echo("  ✅ Excellent RDS Reserved Instance coverage!")
+        else:
+            click.echo("  ✅ Good RDS Reserved Instance coverage")
+        
+        if utilization < 70:
+            click.echo("  ⚠️  Low utilization - review instance sizing")
+        elif utilization >= 90:
+            click.echo("  ✅ Excellent utilization of Reserved Instances!")
+        else:
+            click.echo("  ✅ Good utilization of Reserved Instances")
+    else:
+        click.echo("No RDS Reserved Instance data available")
     
     # Additional metrics
     if total_cost > 0 and 'total_savings' in total_savings:

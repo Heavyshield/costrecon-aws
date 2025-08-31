@@ -87,25 +87,19 @@ class CostExplorerClient:
             coverage percentage, and on-demand costs that could be covered
         """
         try:
+            # Get RDS coverage without groupBy since we're filtering to RDS only
             response = self.client.get_reservation_coverage(
                 TimePeriod={
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
-                GroupBy=[
-                    {
-                        'Type': 'DIMENSION',
-                        'Key': 'SERVICE'
-                    }
-                ],
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
                         'Values': ['Amazon Relational Database Service']
                     }
                 },
-                Granularity='MONTHLY',
-                Metrics=['CoverageHoursPercentage', 'CoverageCostPercentage']
+                Granularity='MONTHLY'
             )
             
             # Calculate average coverage percentages
@@ -118,43 +112,35 @@ class CostExplorerClient:
                 period_start = result.get('TimePeriod', {}).get('Start', '')
                 period_end = result.get('TimePeriod', {}).get('End', '')
                 
-                # Extract RDS-specific coverage data
-                for group in result.get('Groups', []):
-                    if 'Amazon Relational Database Service' in group.get('Keys', []):
-                        coverage = group.get('Coverage', {})
-                        
-                        hours_coverage = float(coverage.get('CoverageHours', {}).get('CoverageHoursPercentage', '0'))
-                        cost_coverage = float(coverage.get('CoverageCost', {}).get('CoverageCostPercentage', '0'))
-                        
-                        total_hours_coverage += hours_coverage
-                        total_cost_coverage += cost_coverage
-                        total_periods += 1
-                        
-                        coverage_details.append({
-                            'period_start': period_start,
-                            'period_end': period_end,
-                            'hours_coverage_percentage': round(hours_coverage, 2),
-                            'cost_coverage_percentage': round(cost_coverage, 2),
-                            'coverage_hours': coverage.get('CoverageHours', {}),
-                            'coverage_cost': coverage.get('CoverageCost', {})
-                        })
+                # Extract coverage data from Total (since we're not grouping)
+                coverage = result.get('Total', {})
+                
+                hours_coverage = float(coverage.get('CoverageHours', {}).get('CoverageHoursPercentage', '0'))
+                cost_coverage = float(coverage.get('CoverageCost', {}).get('CoverageCostPercentage', '0'))
+                
+                total_hours_coverage += hours_coverage
+                total_cost_coverage += cost_coverage
+                total_periods += 1
+                
+                coverage_details.append({
+                    'period_start': period_start,
+                    'period_end': period_end,
+                    'hours_coverage_percentage': round(hours_coverage, 2),
+                    'cost_coverage_percentage': round(cost_coverage, 2),
+                    'coverage_hours': coverage.get('CoverageHours', {}),
+                    'coverage_cost': coverage.get('CoverageCost', {})
+                })
             
             # Calculate averages
             avg_hours_coverage = total_hours_coverage / total_periods if total_periods > 0 else 0.0
             avg_cost_coverage = total_cost_coverage / total_periods if total_periods > 0 else 0.0
             
-            # Get additional RDS utilization data
+            # Get additional RDS utilization data (without groupBy)
             utilization_response = self.client.get_reservation_utilization(
                 TimePeriod={
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
-                GroupBy=[
-                    {
-                        'Type': 'DIMENSION',
-                        'Key': 'SERVICE'
-                    }
-                ],
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
@@ -169,22 +155,21 @@ class CostExplorerClient:
             utilization_periods = 0
             
             for result in utilization_response.get('UtilizationsByTime', []):
-                for group in result.get('Groups', []):
-                    if 'Amazon Relational Database Service' in group.get('Keys', []):
-                        utilization = group.get('Utilization', {})
-                        utilization_percentage = float(utilization.get('UtilizationPercentage', '0'))
-                        
-                        total_utilization += utilization_percentage
-                        utilization_periods += 1
-                        
-                        utilization_details.append({
-                            'period_start': result.get('TimePeriod', {}).get('Start', ''),
-                            'period_end': result.get('TimePeriod', {}).get('End', ''),
-                            'utilization_percentage': round(utilization_percentage, 2),
-                            'purchased_hours': utilization.get('PurchasedHours', '0'),
-                            'used_hours': utilization.get('UsedHours', '0'),
-                            'total_actual_hours': utilization.get('TotalActualHours', '0')
-                        })
+                # Extract utilization from Total (since we're not grouping)
+                utilization = result.get('Total', {})
+                utilization_percentage = float(utilization.get('UtilizationPercentage', '0'))
+                
+                total_utilization += utilization_percentage
+                utilization_periods += 1
+                
+                utilization_details.append({
+                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                    'period_end': result.get('TimePeriod', {}).get('End', ''),
+                    'utilization_percentage': round(utilization_percentage, 2),
+                    'purchased_hours': utilization.get('PurchasedHours', '0'),
+                    'used_hours': utilization.get('UsedHours', '0'),
+                    'total_actual_hours': utilization.get('TotalActualHours', '0')
+                })
             
             avg_utilization = total_utilization / utilization_periods if utilization_periods > 0 else 0.0
             
