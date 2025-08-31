@@ -79,10 +79,136 @@ class CostExplorerClient:
         except Exception as e:
             raise Exception(f"Failed to fetch Savings Plan coverage: {str(e)}")
         
-    # TODO
     def get_RDS_coverage(self) -> Dict:
-
-        return 'todo'
+        """Get RDS Reserved Instance coverage for the selected period.
+        
+        Returns:
+            Dictionary containing RDS RI coverage data including utilization,
+            coverage percentage, and on-demand costs that could be covered
+        """
+        try:
+            response = self.client.get_reservation_coverage(
+                TimePeriod={
+                    'Start': self.start_date.strftime('%Y-%m-%d'),
+                    'End': self.end_date.strftime('%Y-%m-%d')
+                },
+                GroupBy=[
+                    {
+                        'Type': 'DIMENSION',
+                        'Key': 'SERVICE'
+                    }
+                ],
+                Filter={
+                    'Dimensions': {
+                        'Key': 'SERVICE',
+                        'Values': ['Amazon Relational Database Service']
+                    }
+                },
+                Granularity='MONTHLY',
+                Metrics=['CoverageHoursPercentage', 'CoverageCostPercentage']
+            )
+            
+            # Calculate average coverage percentages
+            total_hours_coverage = 0.0
+            total_cost_coverage = 0.0
+            total_periods = 0
+            coverage_details = []
+            
+            for result in response.get('CoveragesByTime', []):
+                period_start = result.get('TimePeriod', {}).get('Start', '')
+                period_end = result.get('TimePeriod', {}).get('End', '')
+                
+                # Extract RDS-specific coverage data
+                for group in result.get('Groups', []):
+                    if 'Amazon Relational Database Service' in group.get('Keys', []):
+                        coverage = group.get('Coverage', {})
+                        
+                        hours_coverage = float(coverage.get('CoverageHours', {}).get('CoverageHoursPercentage', '0'))
+                        cost_coverage = float(coverage.get('CoverageCost', {}).get('CoverageCostPercentage', '0'))
+                        
+                        total_hours_coverage += hours_coverage
+                        total_cost_coverage += cost_coverage
+                        total_periods += 1
+                        
+                        coverage_details.append({
+                            'period_start': period_start,
+                            'period_end': period_end,
+                            'hours_coverage_percentage': round(hours_coverage, 2),
+                            'cost_coverage_percentage': round(cost_coverage, 2),
+                            'coverage_hours': coverage.get('CoverageHours', {}),
+                            'coverage_cost': coverage.get('CoverageCost', {})
+                        })
+            
+            # Calculate averages
+            avg_hours_coverage = total_hours_coverage / total_periods if total_periods > 0 else 0.0
+            avg_cost_coverage = total_cost_coverage / total_periods if total_periods > 0 else 0.0
+            
+            # Get additional RDS utilization data
+            utilization_response = self.client.get_reservation_utilization(
+                TimePeriod={
+                    'Start': self.start_date.strftime('%Y-%m-%d'),
+                    'End': self.end_date.strftime('%Y-%m-%d')
+                },
+                GroupBy=[
+                    {
+                        'Type': 'DIMENSION',
+                        'Key': 'SERVICE'
+                    }
+                ],
+                Filter={
+                    'Dimensions': {
+                        'Key': 'SERVICE',
+                        'Values': ['Amazon Relational Database Service']
+                    }
+                },
+                Granularity='MONTHLY'
+            )
+            
+            utilization_details = []
+            total_utilization = 0.0
+            utilization_periods = 0
+            
+            for result in utilization_response.get('UtilizationsByTime', []):
+                for group in result.get('Groups', []):
+                    if 'Amazon Relational Database Service' in group.get('Keys', []):
+                        utilization = group.get('Utilization', {})
+                        utilization_percentage = float(utilization.get('UtilizationPercentage', '0'))
+                        
+                        total_utilization += utilization_percentage
+                        utilization_periods += 1
+                        
+                        utilization_details.append({
+                            'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                            'period_end': result.get('TimePeriod', {}).get('End', ''),
+                            'utilization_percentage': round(utilization_percentage, 2),
+                            'purchased_hours': utilization.get('PurchasedHours', '0'),
+                            'used_hours': utilization.get('UsedHours', '0'),
+                            'total_actual_hours': utilization.get('TotalActualHours', '0')
+                        })
+            
+            avg_utilization = total_utilization / utilization_periods if utilization_periods > 0 else 0.0
+            
+            return {
+                'average_hours_coverage_percentage': round(avg_hours_coverage, 2),
+                'average_cost_coverage_percentage': round(avg_cost_coverage, 2),
+                'average_utilization_percentage': round(avg_utilization, 2),
+                'detailed_coverage': coverage_details,
+                'detailed_utilization': utilization_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'service': 'Amazon Relational Database Service'
+            }
+            
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'AccessDenied':
+                raise Exception("Access denied. Please ensure your AWS credentials have RDS Reserved Instance permissions.")
+            else:
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch RDS coverage data: {str(e)}")
     
     def get_total_savings(self) -> Dict:
         """Get total savings from all AWS cost optimization services.
@@ -262,6 +388,7 @@ class CostExplorerClient:
         savings_breakdown['total_savings'] = round(total, 2)
         
         return savings_breakdown
+
     def get_cost_and_usage(self) -> Dict:
         """Fetch cost and usage data from AWS Cost Explorer.
         Uses class-level start_date and end_date.

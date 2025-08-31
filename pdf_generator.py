@@ -51,12 +51,12 @@ class PDFReportGenerator:
         
         return styles
     
-    def generate_report(self, cost_data: Dict, output_filename: str, 
+    def generate_report(self, report_data: List[Dict], output_filename: str, 
                        start_date: datetime, end_date: datetime) -> None:
-        """Generate a PDF report from cost data.
+        """Generate a PDF report from complete report data.
         
         Args:
-            cost_data: Cost data from AWS Cost Explorer
+            report_data: Complete report data list [cost_data, total_savings, sp_coverage]
             output_filename: Output PDF filename
             start_date: Report start date
             end_date: Report end date
@@ -70,13 +70,24 @@ class PDFReportGenerator:
             bottomMargin=18
         )
         
+        # Extract data components
+        cost_data = report_data[0] if len(report_data) > 0 else {}
+        total_savings = report_data[1] if len(report_data) > 1 else {}
+        sp_coverage = report_data[2] if len(report_data) > 2 else {}
+        
         story = []
         
         # Title page
         story.extend(self._create_title_page(start_date, end_date))
         
         # Executive summary
-        story.extend(self._create_executive_summary(cost_data))
+        story.extend(self._create_executive_summary(cost_data, total_savings))
+        
+        # Savings summary
+        story.extend(self._create_savings_summary(total_savings))
+        
+        # Coverage summary
+        story.extend(self._create_coverage_summary(sp_coverage))
         
         # Cost breakdown
         story.extend(self._create_cost_breakdown(cost_data))
@@ -114,7 +125,7 @@ class PDFReportGenerator:
         
         return story
     
-    def _create_executive_summary(self, cost_data: Dict) -> List:
+    def _create_executive_summary(self, cost_data: Dict, total_savings: Dict) -> List:
         """Create executive summary section."""
         story = []
         
@@ -122,14 +133,17 @@ class PDFReportGenerator:
         
         # Calculate total costs
         total_cost = self._calculate_total_cost(cost_data)
+        total_savings_amount = total_savings.get('total_savings', 0.0)
         
         summary_data = [
             ["Total Cost", f"${total_cost:.2f}"],
+            ["Total Monthly Savings", f"${total_savings_amount:.2f}"],
+            ["Cost Optimization Rate", f"{(total_savings_amount/total_cost*100):.1f}%" if total_cost > 0 else "N/A"],
             ["Number of Services", str(len(cost_data.get('services', {}).get('DimensionValues', [])))],
-            ["Report Period", f"{(cost_data['period']['end'] - cost_data['period']['start']).days} days"]
+            ["Report Period", f"{(cost_data['period']['end'] - cost_data['period']['start']).days} days" if cost_data.get('period') else "N/A"]
         ]
         
-        summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
+        summary_table = Table(summary_data, colWidths=[2.5*inch, 2*inch])
         summary_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.darkblue),
@@ -145,6 +159,123 @@ class PDFReportGenerator:
         story.append(Spacer(1, 20))
         
         return story
+    
+    def _create_savings_summary(self, total_savings: Dict) -> List:
+        """Create savings summary section."""
+        story = []
+        
+        story.append(Paragraph("Savings Summary", self.custom_styles['SectionHeader']))
+        
+        if not total_savings or 'total_savings' not in total_savings:
+            story.append(Paragraph("No savings data available.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        # Savings breakdown table
+        savings_data = [["Savings Source", "Monthly Amount", "Percentage"]]
+        total_amount = total_savings.get('total_savings', 0)
+        
+        savings_items = [
+            ("Savings Plans", total_savings.get('savings_plans', 0)),
+            ("EC2 Reservations", total_savings.get('ec2_reservations', 0)),
+            ("RDS Reservations", total_savings.get('rds_reservations', 0)),
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
+            ("MAP/Rightsizing", total_savings.get('map_savings', 0))
+        ]
+        
+        for source, amount in savings_items:
+            if amount > 0:
+                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
+                savings_data.append([source, f"${amount:.2f}", f"{percentage:.1f}%"])
+        
+        # Add total row
+        savings_data.append(["TOTAL", f"${total_amount:.2f}", "100.0%"])
+        
+        savings_table = Table(savings_data, colWidths=[2.5*inch, 1.5*inch, 1*inch])
+        savings_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.darkgreen),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -2), colors.lightgrey),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(savings_table)
+        story.append(Spacer(1, 10))
+        
+        # Add errors if any
+        if total_savings.get('errors'):
+            story.append(Paragraph("Savings Collection Errors:", self.custom_styles['SubHeader']))
+            for error in total_savings.get('errors', []):
+                story.append(Paragraph(f"• {error}", self.styles['Normal']))
+            story.append(Spacer(1, 10))
+        
+        story.append(Spacer(1, 20))
+        return story
+    
+    def _create_coverage_summary(self, sp_coverage: Dict) -> List:
+        """Create savings plans coverage summary section."""
+        story = []
+        
+        story.append(Paragraph("Savings Plans Coverage", self.custom_styles['SectionHeader']))
+        
+        if not sp_coverage or 'average_coverage_percentage' not in sp_coverage:
+            story.append(Paragraph("No Savings Plans coverage data available.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        coverage_pct = sp_coverage.get('average_coverage_percentage', 0)
+        
+        coverage_data = [
+            ["Metric", "Value"],
+            ["Average Coverage", f"{coverage_pct:.1f}%"],
+            ["Coverage Status", self._get_coverage_status(coverage_pct)],
+            ["Recommendation", self._get_coverage_recommendation(coverage_pct)]
+        ]
+        
+        coverage_table = Table(coverage_data, colWidths=[2*inch, 3*inch])
+        coverage_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.darkblue),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')
+        ]))
+        
+        story.append(coverage_table)
+        story.append(Spacer(1, 20))
+        
+        return story
+    
+    def _get_coverage_status(self, coverage_pct: float) -> str:
+        """Get coverage status based on percentage."""
+        if coverage_pct >= 90:
+            return "Excellent"
+        elif coverage_pct >= 70:
+            return "Good" 
+        elif coverage_pct >= 50:
+            return "Fair"
+        else:
+            return "Poor"
+    
+    def _get_coverage_recommendation(self, coverage_pct: float) -> str:
+        """Get coverage recommendation based on percentage."""
+        if coverage_pct >= 90:
+            return "Maintain current coverage levels"
+        elif coverage_pct >= 70:
+            return "Consider increasing coverage for additional savings"
+        else:
+            return "Review workload patterns and consider Savings Plans"
     
     def _create_cost_breakdown(self, cost_data: Dict) -> List:
         """Create cost breakdown section."""
