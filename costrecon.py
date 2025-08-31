@@ -237,13 +237,25 @@ def cli(month, output, profile, region):
         click.echo("Fetching savings plan coverage for 3-month trend analysis...")
         
         click.echo("  - Fetching coverage for selected month...")
-        sp_coverage_selected = cost_client_selected_month.get_saving_plan_coverage()
+        try:
+            sp_coverage_selected = cost_client_selected_month.get_saving_plan_coverage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            sp_coverage_selected = {}
         
         click.echo("  - Fetching coverage for month -1...")
-        sp_coverage_month_one = cost_client_month_one.get_saving_plan_coverage()
+        try:
+            sp_coverage_month_one = cost_client_month_one.get_saving_plan_coverage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            sp_coverage_month_one = {}
         
         click.echo("  - Fetching coverage for month -2...")
-        sp_coverage_month_two = cost_client_month_two.get_saving_plan_coverage()
+        try:
+            sp_coverage_month_two = cost_client_month_two.get_saving_plan_coverage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            sp_coverage_month_two = {}
         
         # Calculate quarterly trend
         click.echo("Calculating quarterly savings plan trend...")
@@ -264,7 +276,11 @@ def cli(month, output, profile, region):
 
         # Fetch RDS coverage data for selected month
         click.echo("Fetching RDS Reserved Instance coverage...")
-        rds_coverage = cost_client_selected_month.get_RDS_coverage()
+        try:
+            rds_coverage = cost_client_selected_month.get_RDS_coverage()
+        except Exception as e:
+            click.echo(f"  Warning: {str(e)}")
+            rds_coverage = {}
         report_raw_data.append(rds_coverage)
 
         # Print console report

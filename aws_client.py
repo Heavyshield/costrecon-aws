@@ -72,10 +72,15 @@ class CostExplorerClient:
             
         except ClientError as e:
             error_code = e.response['Error']['Code']
+            error_message = e.response['Error']['Message']
             if error_code == 'AccessDenied':
                 raise Exception("Access denied. Please ensure your AWS credentials have Savings Plans permissions.")
+            elif error_code == 'DataUnavailableException':
+                raise Exception(f"No Savings Plans coverage data available for period {self.start_date.strftime('%Y-%m-%d')} to {self.end_date.strftime('%Y-%m-%d')}")
+            elif error_code == 'InvalidParameterValueException':
+                raise Exception(f"Invalid date range for Savings Plans coverage: {self.start_date.strftime('%Y-%m-%d')} to {self.end_date.strftime('%Y-%m-%d')} - {error_message}")
             else:
-                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
+                raise Exception(f"AWS API Error ({error_code}): {error_message}")
         except Exception as e:
             raise Exception(f"Failed to fetch Savings Plan coverage: {str(e)}")
         
