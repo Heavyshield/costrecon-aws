@@ -12,4 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-costrecon = "costrecon.main:cli"
+costrecon = "costrecon:cli"
+
+[tool.setuptools]
+py-modules = ["costrecon", "aws_client", "pdf_generator"]

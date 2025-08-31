@@ -43,3 +43,6 @@ cost_report_*.pdf
 .coverage
 .pytest_cache/
 htmlcov/
+
+# Claude
+CLAUDE.md

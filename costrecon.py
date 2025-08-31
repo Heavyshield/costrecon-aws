@@ -29,11 +29,15 @@ def cli(start_date, end_date, output, profile, region):
     
     try:
         # Initialize AWS Cost Explorer client
-        cost_client = CostExplorerClient(profile=profile, region=region)
+        parameters = {
+            "start_date": start_date,
+            "end_date": end_date
+        }
+        cost_client = CostExplorerClient(profile=profile, region=region, parameters=parameters)
         
         # Fetch cost data
         click.echo("Fetching cost data from AWS Cost Explorer...")
-        cost_data = cost_client.get_cost_and_usage(start_date, end_date)
+        cost_data = cost_client.get_cost_and_usage()
         
         # Generate PDF report
         click.echo("Generating PDF report...")
