@@ -89,9 +89,6 @@ class PDFReportGenerator:
         # Coverage summary
         story.extend(self._create_coverage_summary(sp_coverage))
         
-        # Cost breakdown
-        story.extend(self._create_cost_breakdown(cost_data))
-        
         # Service details
         story.extend(self._create_service_details(cost_data))
         
@@ -277,40 +274,6 @@ class PDFReportGenerator:
         else:
             return "Review workload patterns and consider Savings Plans"
     
-    def _create_cost_breakdown(self, cost_data: Dict) -> List:
-        """Create cost breakdown section."""
-        story = []
-        
-        story.append(Paragraph("Daily Cost Breakdown", self.custom_styles['SectionHeader']))
-        
-        # Extract daily costs from the cost data
-        daily_costs = self._extract_daily_costs(cost_data)
-        
-        if daily_costs:
-            table_data = [["Date", "Cost (USD)"]]
-            for date, cost in daily_costs:
-                table_data.append([date, f"${cost:.2f}"])
-            
-            cost_table = Table(table_data, colWidths=[2*inch, 2*inch])
-            cost_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.darkblue),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            
-            story.append(cost_table)
-        else:
-            story.append(Paragraph("No daily cost data available.", self.styles['Normal']))
-        
-        story.append(Spacer(1, 20))
-        
-        return story
-    
     def _create_service_details(self, cost_data: Dict) -> List:
         """Create service details section."""
         story = []
@@ -359,20 +322,3 @@ class PDFReportGenerator:
         
         return total
     
-    def _extract_daily_costs(self, cost_data: Dict) -> List[tuple]:
-        """Extract daily costs from cost data."""
-        daily_costs = []
-        
-        cost_results = cost_data.get('cost_data', {}).get('ResultsByTime', [])
-        
-        for result in cost_results:
-            start_date = result.get('TimePeriod', {}).get('Start', '')
-            total_cost = result.get('Total', {}).get('BlendedCost', {}).get('Amount', '0')
-            
-            try:
-                cost_amount = float(total_cost)
-                daily_costs.append((start_date, cost_amount))
-            except ValueError:
-                continue
-        
-        return sorted(daily_costs)  # Sort by date

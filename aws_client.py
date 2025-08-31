@@ -254,6 +254,12 @@ class CostExplorerClient:
             
             savings_breakdown['savings_plans'] = round(sp_savings, 2)
             
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'DataUnavailableException':
+                savings_breakdown['errors'].append("Savings Plans: No Savings Plans data available for this period")
+            else:
+                savings_breakdown['errors'].append(f"Savings Plans: {e.response['Error']['Message']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"Savings Plans: {str(e)}")
         
@@ -264,12 +270,6 @@ class CostExplorerClient:
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
-                GroupBy=[
-                    {
-                        'Type': 'DIMENSION',
-                        'Key': 'SERVICE'
-                    }
-                ],
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
@@ -281,12 +281,17 @@ class CostExplorerClient:
             
             rds_savings = 0.0
             for result in rds_response.get('UtilizationsByTime', []):
-                for group in result.get('Groups', []):
-                    savings_amount = float(group.get('Attributes', {}).get('NetRISavings', '0'))
-                    rds_savings += savings_amount
+                total_savings = result.get('Total', {}).get('NetRISavings', '0')
+                rds_savings += float(total_savings)
             
             savings_breakdown['rds_reservations'] = round(rds_savings, 2)
             
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ValidationException':
+                savings_breakdown['errors'].append("RDS Reservations: No RDS Reserved Instances found")
+            else:
+                savings_breakdown['errors'].append(f"RDS Reservations: {e.response['Error']['Message']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"RDS Reservations: {str(e)}")
         
@@ -297,12 +302,6 @@ class CostExplorerClient:
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
-                GroupBy=[
-                    {
-                        'Type': 'DIMENSION',
-                        'Key': 'SERVICE'
-                    }
-                ],
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
@@ -314,12 +313,17 @@ class CostExplorerClient:
             
             opensearch_savings = 0.0
             for result in opensearch_response.get('UtilizationsByTime', []):
-                for group in result.get('Groups', []):
-                    savings_amount = float(group.get('Attributes', {}).get('NetRISavings', '0'))
-                    opensearch_savings += savings_amount
+                total_savings = result.get('Total', {}).get('NetRISavings', '0')
+                opensearch_savings += float(total_savings)
             
             savings_breakdown['opensearch_reservations'] = round(opensearch_savings, 2)
             
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ValidationException':
+                savings_breakdown['errors'].append("OpenSearch Reservations: No OpenSearch Reserved Instances found")
+            else:
+                savings_breakdown['errors'].append(f"OpenSearch Reservations: {e.response['Error']['Message']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"OpenSearch Reservations: {str(e)}")
         
@@ -330,12 +334,6 @@ class CostExplorerClient:
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
-                GroupBy=[
-                    {
-                        'Type': 'DIMENSION',
-                        'Key': 'SERVICE'
-                    }
-                ],
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
@@ -347,12 +345,17 @@ class CostExplorerClient:
             
             ec2_savings = 0.0
             for result in ec2_response.get('UtilizationsByTime', []):
-                for group in result.get('Groups', []):
-                    savings_amount = float(group.get('Attributes', {}).get('NetRISavings', '0'))
-                    ec2_savings += savings_amount
+                total_savings = result.get('Total', {}).get('NetRISavings', '0')
+                ec2_savings += float(total_savings)
             
             savings_breakdown['ec2_reservations'] = round(ec2_savings, 2)
             
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ValidationException':
+                savings_breakdown['errors'].append("EC2 Reservations: No EC2 Reserved Instances found")
+            else:
+                savings_breakdown['errors'].append(f"EC2 Reservations: {e.response['Error']['Message']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"EC2 Reservations: {str(e)}")
         
@@ -375,6 +378,14 @@ class CostExplorerClient:
             
             savings_breakdown['map_savings'] = round(map_savings, 2)
             
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'AccessDeniedException':
+                savings_breakdown['errors'].append("MAP/Rightsizing: Feature not enabled - can be enabled in Cost Explorer Preferences")
+            elif error_code == 'DataUnavailableException':
+                savings_breakdown['errors'].append("MAP/Rightsizing: No rightsizing recommendations available yet (requires 24h+ data)")
+            else:
+                savings_breakdown['errors'].append(f"MAP/Rightsizing: {e.response['Error']['Message']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"MAP/Rightsizing: {str(e)}")
         

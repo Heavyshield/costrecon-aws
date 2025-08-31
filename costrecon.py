@@ -1,128 +1,109 @@
 """Main CLI entry point for CostRecon."""
 
 import click
-from datetime import datetime, timedelta
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+import calendar
 from aws_client import CostExplorerClient
-from pdf_generator import PDFReportGenerator
+from pdf_report_generator import PDFReportGenerator
+from cli_report_generator import print_console_report
 
 
-def print_console_report(report_data, start_date, end_date):
-    """Print formatted cost report to console."""
-    click.echo("\n" + "="*80)
-    click.echo("AWS COST RECONNAISSANCE REPORT".center(80))
-    click.echo("="*80)
-    click.echo(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-    click.echo("="*80)
+def parse_month_year(month_input: str, current_year: int = None) -> tuple:
+    """Parse month input and return start_date, end_date for that month.
     
-    # Parse report data (expecting list with cost_data, total_savings, sp_coverage)
-    cost_data = report_data[0] if len(report_data) > 0 else {}
-    total_savings = report_data[1] if len(report_data) > 1 else {}
-    sp_coverage = report_data[2] if len(report_data) > 2 else {}
+    Args:
+        month_input: Month name (jan, feb, march, etc.) or month-year (jan2024, feb-2024)
+        current_year: Year to use if not specified in month_input
     
-    # Cost Summary
-    click.echo("\n📊 COST SUMMARY")
-    click.echo("-" * 40)
+    Returns:
+        Tuple of (start_date, end_date) for the specified month
+    """
+    if current_year is None:
+        current_year = datetime.now().year
     
-    total_cost = 0.0
-    service_costs = {}
+    month_input = month_input.lower().strip()
     
-    if 'cost_data' in cost_data:
-        for result in cost_data['cost_data'].get('ResultsByTime', []):
-            for group in result.get('Groups', []):
-                service_name = group.get('Keys', ['Unknown'])[0]
-                amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
-                total_cost += amount
-                
-                if service_name in service_costs:
-                    service_costs[service_name] += amount
-                else:
-                    service_costs[service_name] = amount
+    # Handle month-year formats like "jan2024", "jan-2024", "jan 2024"
+    year = current_year
+    month_str = month_input
     
-    click.echo(f"Total Cost: ${total_cost:.2f}")
+    # Extract year if present
+    for separator in ['2024', '2023', '2025', '-', ' ']:
+        if separator in month_input:
+            parts = month_input.replace('-', ' ').replace('2024', ' 2024').replace('2023', ' 2023').replace('2025', ' 2025').split()
+            if len(parts) == 2:
+                month_str = parts[0]
+                try:
+                    year = int(parts[1])
+                except ValueError:
+                    pass
+            break
     
-    # Top services by cost
-    if service_costs:
-        click.echo("\nTop Services by Cost:")
-        sorted_services = sorted(service_costs.items(), key=lambda x: x[1], reverse=True)[:10]
-        for service, cost in sorted_services:
-            percentage = (cost / total_cost * 100) if total_cost > 0 else 0
-            click.echo(f"  • {service[:40]:<40} ${cost:>8.2f} ({percentage:>5.1f}%)")
+    # Month name mappings
+    month_names = {
+        'jan': 1, 'january': 1,
+        'feb': 2, 'february': 2,
+        'mar': 3, 'march': 3,
+        'apr': 4, 'april': 4,
+        'may': 5,
+        'jun': 6, 'june': 6,
+        'jul': 7, 'july': 7,
+        'aug': 8, 'august': 8,
+        'sep': 9, 'september': 9, 'sept': 9,
+        'oct': 10, 'october': 10,
+        'nov': 11, 'november': 11,
+        'dec': 12, 'december': 12
+    }
     
-    # Savings Summary
-    click.echo("\n💰 SAVINGS SUMMARY")
-    click.echo("-" * 40)
+    if month_str not in month_names:
+        available_months = ', '.join(sorted(month_names.keys()))
+        raise click.BadParameter(f"Invalid month '{month_str}'. Available: {available_months}")
     
-    if 'total_savings' in total_savings:
-        total_amount = total_savings.get('total_savings', 0)
-        click.echo(f"Total Monthly Savings: ${total_amount:.2f}")
-        
-        savings_breakdown = [
-            ("Savings Plans", total_savings.get('savings_plans', 0)),
-            ("EC2 Reservations", total_savings.get('ec2_reservations', 0)),
-            ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
-            ("MAP/Rightsizing", total_savings.get('map_savings', 0))
-        ]
-        
-        click.echo("\nSavings Breakdown:")
-        for source, amount in savings_breakdown:
-            if amount > 0:
-                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
-                click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
-        
-        if total_savings.get('errors'):
-            click.echo("\n⚠️  Savings Collection Errors:")
-            for error in total_savings.get('errors', []):
-                click.echo(f"  • {error}")
+    month_num = month_names[month_str]
     
-    # Coverage Summary
-    click.echo("\n📈 SAVINGS PLANS COVERAGE")
-    click.echo("-" * 40)
+    # Get first and last day of the month
+    start_date = datetime(year, month_num, 1)
+    last_day = calendar.monthrange(year, month_num)[1]
+    end_date = datetime(year, month_num, last_day)
     
-    if 'average_coverage_percentage' in sp_coverage:
-        coverage_pct = sp_coverage.get('average_coverage_percentage', 0)
-        click.echo(f"Average Coverage: {coverage_pct:.1f}%")
-        
-        if coverage_pct < 70:
-            click.echo("  ⚠️  Coverage below recommended 70% threshold")
-        elif coverage_pct >= 90:
-            click.echo("  ✅ Excellent coverage!")
-        else:
-            click.echo("  ✅ Good coverage")
-    
-    # Additional metrics
-    if total_cost > 0 and 'total_savings' in total_savings:
-        savings_rate = (total_savings.get('total_savings', 0) / total_cost * 100)
-        click.echo(f"\n📊 OPTIMIZATION METRICS")
-        click.echo("-" * 40)
-        click.echo(f"Cost Optimization Rate: {savings_rate:.1f}%")
-        click.echo(f"Potential Monthly Savings: ${total_savings.get('total_savings', 0):.2f}")
-        click.echo(f"Annualized Savings: ${total_savings.get('total_savings', 0) * 12:.2f}")
-    
-    click.echo("\n" + "="*80)
-    click.echo("Report complete. PDF generation will follow...")
-    click.echo("="*80 + "\n")
+    return start_date, end_date
+
 
 
 @click.command()
-@click.option('--start-date', type=click.DateTime(formats=['%Y-%m-%d']), 
-              help='Start date for cost analysis (YYYY-MM-DD). Defaults to 30 days ago.')
-@click.option('--end-date', type=click.DateTime(formats=['%Y-%m-%d']), 
-              help='End date for cost analysis (YYYY-MM-DD). Defaults to today.')
+@click.option('--month', '-m', 
+              help='Month for cost analysis (jan, feb, march, etc.). Can include year (jan2024, feb-2024). Defaults to current month.')
 @click.option('--output', '-o', default='cost_report.pdf', 
               help='Output PDF filename. Default: cost_report.pdf')
 @click.option('--profile', help='AWS profile to use. Uses default profile if not specified.')
 @click.option('--region', default='us-east-1', help='AWS region. Default: us-east-1')
-def cli(start_date, end_date, output, profile, region):
-    """Extract AWS cost data and generate PDF report."""
+def cli(month, output, profile, region):
+    """Extract AWS cost data for a specific month and generate comprehensive PDF report.
     
-    # Set default dates if not provided
-    if not end_date:
-        end_date = datetime.now()
-    if not start_date:
-        start_date = end_date - timedelta(days=30)
+    Examples:
+    \b
+        costrecon --month jan                 # January of current year
+        costrecon --month january2024         # January 2024
+        costrecon --month feb-2024            # February 2024
+        costrecon -m dec                      # December of current year
+        costrecon                             # Current month
+    """
     
-    click.echo(f"Generating cost report from {start_date.date()} to {end_date.date()}")
+    # Parse month and calculate dates
+    if not month:
+        # Default to current month
+        current_date = datetime.now()
+        month = current_date.strftime('%b').lower()
+    
+    try:
+        start_date, end_date = parse_month_year(month)
+    except click.BadParameter as e:
+        click.echo(f"Error: {e}", err=True)
+        raise click.Abort()
+    
+    click.echo(f"Generating cost report for {start_date.strftime('%B %Y')}")
+    click.echo(f"Period: {start_date.date()} to {end_date.date()}")
     click.echo(f"Output file: {output}")
     
     try:
@@ -130,6 +111,22 @@ def cli(start_date, end_date, output, profile, region):
         parameters = {
             "start_date": start_date,
             "end_date": end_date
+        }
+        
+        # Calculate previous month -1 dates
+        month_one_start = start_date - relativedelta(months=1)
+        month_one_end = end_date - relativedelta(months=1)
+        parameters_previous_month_one = {
+            "start_date": month_one_start,
+            "end_date": month_one_end
+        }
+        
+        # Calculate previous month -2 dates
+        month_two_start = start_date - relativedelta(months=2)
+        month_two_end = end_date - relativedelta(months=2)
+        parameters_previous_month_two = {
+            "start_date": month_two_start,
+            "end_date": month_two_end
         }
         cost_client = CostExplorerClient(profile=profile, region=region, parameters=parameters)
         
@@ -146,7 +143,7 @@ def cli(start_date, end_date, output, profile, region):
         total_savings = cost_client.get_total_savings()
         report_raw_data.append(total_savings)
 
-        # Fetch saving plan coverage
+        # Fetch saving plan coverage 
         click.echo("Fetching saving plan coverage from AWS Cost Explorer...")
         sp_coverage = cost_client.get_saving_plan_coverage()
         report_raw_data.append(sp_coverage)
