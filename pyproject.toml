@@ -1,0 +1,15 @@
+[project]
+name = "costrecon"
+version = "0.1.0"
+description = "AWS Cost Explorer data extraction and PDF reporting tool"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.40.21",
+    "click>=8.1.0",
+    "reportlab>=4.0.0",
+    "python-dateutil>=2.8.0",
+]
+
+[project.scripts]
+costrecon = "costrecon.main:cli"
