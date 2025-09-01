@@ -84,6 +84,7 @@ class PDFReportGenerator:
         sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
         rds_coverage = report_data[3] if len(report_data) > 3 else {}
         quarterly_costs = report_data[4] if len(report_data) > 4 else {}
+        budget_anomalies = report_data[5] if len(report_data) > 5 else {}
         
         # Extract current month coverage for backward compatibility
         sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
@@ -111,6 +112,9 @@ class PDFReportGenerator:
         
         # 6. Quarter total cost
         story.extend(self._create_quarterly_cost_summary(quarterly_costs))
+        
+        # 7. Budget Anomalies (at the end)
+        story.extend(self._create_budget_anomalies_summary(budget_anomalies))
         
         # Service details (moved to end)
         story.extend(self._create_service_details(cost_data))
@@ -603,4 +607,125 @@ class PDFReportGenerator:
                 return f"Stable ({overall_change:+.1f}% quarterly change)"
         else:
             return "Insufficient data for trend analysis"
+    
+    def _create_budget_anomalies_summary(self, budget_anomalies: Dict) -> List:
+        """Create budget anomalies summary section."""
+        story = []
+        
+        story.append(Paragraph("Budget Anomalies Analysis", self.custom_styles['SectionHeader']))
+        
+        if not budget_anomalies or 'anomaly_budgets' not in budget_anomalies:
+            story.append(Paragraph("No budget data available - Budget analysis requires AWS Budgets to be configured.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        anomaly_budgets = budget_anomalies.get('anomaly_budgets', [])
+        total_checked = budget_anomalies.get('total_budgets_checked', 0)
+        anomalies_found = budget_anomalies.get('anomalies_found', 0)
+        threshold = budget_anomalies.get('threshold_percentage', 10.0)
+        
+        # Summary statistics
+        summary_data = [
+            ["Metric", "Value"],
+            ["Total Budgets Checked", str(total_checked)],
+            ["Anomalies Found", str(anomalies_found)],
+            ["Threshold Used", f"{threshold}%"],
+            ["Budget Health", "GOOD" if anomalies_found == 0 else "REQUIRES ATTENTION"]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[2.5*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_orange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+        
+        story.append(summary_table)
+        story.append(Spacer(1, 15))
+        
+        # Detailed anomalies if any
+        if anomaly_budgets:
+            story.append(Paragraph("Budget Anomalies Details:", self.custom_styles['SubHeader']))
+            
+            # Create detailed table
+            anomalies_data = [["Budget Name", "Limit", "Actual", "Above Target", "Severity"]]
+            
+            for budget in anomaly_budgets:
+                budget_name = budget.get('budget_name', 'Unknown')[:25]  # Truncate long names
+                budget_limit = budget.get('budget_limit', 0)
+                actual_amount = budget.get('actual_amount', 0)
+                above_target = budget.get('actual_above_target', 0)
+                severity = budget.get('severity', 'LOW')
+                currency = budget.get('currency', 'USD')
+                
+                anomalies_data.append([
+                    budget_name,
+                    f"{currency} {budget_limit:.0f}",
+                    f"{currency} {actual_amount:.0f}",
+                    f"{currency} {above_target:.0f}",
+                    severity
+                ])
+            
+            anomalies_table = Table(anomalies_data, colWidths=[2*inch, 1*inch, 1*inch, 1*inch, 0.8*inch])
+            anomalies_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.amazon_dark_blue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+                ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP')
+            ]))
+            
+            # Color code severity
+            for i, budget in enumerate(anomaly_budgets, 1):
+                severity = budget.get('severity', 'LOW')
+                if severity == 'CRITICAL':
+                    anomalies_table.setStyle(TableStyle([('BACKGROUND', (4, i), (4, i), colors.red)]))
+                elif severity == 'HIGH':
+                    anomalies_table.setStyle(TableStyle([('BACKGROUND', (4, i), (4, i), colors.orange)]))
+                elif severity == 'MEDIUM':
+                    anomalies_table.setStyle(TableStyle([('BACKGROUND', (4, i), (4, i), colors.yellow)]))
+            
+            story.append(anomalies_table)
+            story.append(Spacer(1, 15))
+            
+            # Recommendations
+            story.append(Paragraph("Recommendations:", self.custom_styles['SubHeader']))
+            
+            critical_budgets = [b for b in anomaly_budgets if b.get('severity') == 'CRITICAL']
+            high_budgets = [b for b in anomaly_budgets if b.get('severity') == 'HIGH']
+            
+            if critical_budgets:
+                story.append(Paragraph(f"• {len(critical_budgets)} budget(s) in CRITICAL state - immediate attention required", self.styles['Normal']))
+            if high_budgets:
+                story.append(Paragraph(f"• {len(high_budgets)} budget(s) in HIGH state - review spending patterns", self.styles['Normal']))
+            
+            if not critical_budgets and not high_budgets:
+                story.append(Paragraph("• Monitor budget trends closely to prevent future overages", self.styles['Normal']))
+            
+            story.append(Paragraph("• Consider adjusting budget limits or implementing cost controls", self.styles['Normal']))
+        else:
+            story.append(Paragraph("✅ All budgets are within acceptable thresholds.", self.styles['Normal']))
+        
+        # Add errors if any
+        errors = budget_anomalies.get('errors', [])
+        if errors:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph("Budget Analysis Errors:", self.custom_styles['SubHeader']))
+            for error in errors:
+                story.append(Paragraph(f"• {error}", self.styles['Normal']))
+        
+        story.append(Spacer(1, 20))
+        return story
     

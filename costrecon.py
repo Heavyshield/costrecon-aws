@@ -343,6 +343,21 @@ def cli(month, output, profile, region):
         # Add quarterly costs to report data
         report_raw_data.append(quarterly_costs)
 
+        # Fetch budget anomalies data
+        click.echo("Fetching budget anomalies...")
+        try:
+            budget_anomalies = cost_client_selected_month.get_budgets_anomalies()
+        except Exception as e:
+            click.echo(f"  Warning: {str(e)}")
+            budget_anomalies = {
+                'anomaly_budgets': [],
+                'total_budgets_checked': 0,
+                'anomalies_found': 0,
+                'threshold_percentage': 10.0,
+                'errors': [f"Budget analysis failed: {str(e)}"]
+            }
+        report_raw_data.append(budget_anomalies)
+
         # Print console report
         print_console_report(report_raw_data, start_date, end_date)
 

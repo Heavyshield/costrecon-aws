@@ -11,12 +11,13 @@ def print_console_report(report_data, start_date, end_date):
     click.echo(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
     click.echo("="*80)
     
-    # Parse report data (expecting list with cost_data, total_savings, sp_coverage_with_trend, rds_coverage, quarterly_costs)
+    # Parse report data (expecting list with cost_data, total_savings, sp_coverage_with_trend, rds_coverage, quarterly_costs, budget_anomalies)
     cost_data = report_data[0] if len(report_data) > 0 else {}
     total_savings = report_data[1] if len(report_data) > 1 else {}
     sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
     rds_coverage = report_data[3] if len(report_data) > 3 else {}
     quarterly_costs = report_data[4] if len(report_data) > 4 else {}
+    budget_anomalies = report_data[5] if len(report_data) > 5 else {}
     
     # Extract current month coverage for backward compatibility
     sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
@@ -209,6 +210,75 @@ def print_console_report(report_data, start_date, end_date):
                 click.echo(f"Quarterly Trend: {trend}")
     else:
         click.echo("No quarterly cost data available")
+    
+    # 7. BUDGET ANOMALIES (at the end)
+    click.echo("\n🚨 BUDGET ANOMALIES ANALYSIS")
+    click.echo("-" * 40)
+    
+    if budget_anomalies and 'anomaly_budgets' in budget_anomalies:
+        anomaly_budgets = budget_anomalies.get('anomaly_budgets', [])
+        total_checked = budget_anomalies.get('total_budgets_checked', 0)
+        anomalies_found = budget_anomalies.get('anomalies_found', 0)
+        threshold = budget_anomalies.get('threshold_percentage', 10.0)
+        
+        click.echo(f"Total Budgets Checked: {total_checked}")
+        click.echo(f"Anomalies Found: {anomalies_found}")
+        click.echo(f"Threshold Used: {threshold}%")
+        
+        if anomaly_budgets:
+            click.echo(f"Budget Health: ⚠️  REQUIRES ATTENTION")
+            click.echo("\nBudget Anomalies Details:")
+            
+            for budget in anomaly_budgets:
+                budget_name = budget.get('budget_name', 'Unknown')
+                budget_limit = budget.get('budget_limit', 0)
+                actual_amount = budget.get('actual_amount', 0)
+                above_target = budget.get('actual_above_target', 0)
+                above_target_pct = budget.get('actual_above_target_percentage', 0)
+                severity = budget.get('severity', 'LOW')
+                currency = budget.get('currency', 'USD')
+                
+                # Severity emoji
+                severity_emoji = {
+                    'CRITICAL': '🔴',
+                    'HIGH': '🟠', 
+                    'MEDIUM': '🟡',
+                    'LOW': '🟢'
+                }.get(severity, '⚪')
+                
+                click.echo(f"\n  • {budget_name}")
+                click.echo(f"    Budget Limit:     {currency} {budget_limit:,.2f}")
+                click.echo(f"    Actual Amount:    {currency} {actual_amount:,.2f}")
+                click.echo(f"    Above Target:     {currency} {above_target:,.2f} ({above_target_pct:+.1f}%)")
+                click.echo(f"    Severity:         {severity_emoji} {severity}")
+            
+            # Count by severity
+            critical_count = len([b for b in anomaly_budgets if b.get('severity') == 'CRITICAL'])
+            high_count = len([b for b in anomaly_budgets if b.get('severity') == 'HIGH'])
+            
+            click.echo("\n💡 Recommendations:")
+            if critical_count > 0:
+                click.echo(f"  • {critical_count} budget(s) in CRITICAL state - immediate attention required")
+            if high_count > 0:
+                click.echo(f"  • {high_count} budget(s) in HIGH state - review spending patterns")
+            
+            if critical_count == 0 and high_count == 0:
+                click.echo("  • Monitor budget trends closely to prevent future overages")
+            
+            click.echo("  • Consider adjusting budget limits or implementing cost controls")
+        else:
+            click.echo("Budget Health: ✅ GOOD")
+            click.echo("All budgets are within acceptable thresholds")
+        
+        # Show errors if any
+        errors = budget_anomalies.get('errors', [])
+        if errors:
+            click.echo("\n⚠️  Budget Analysis Errors:")
+            for error in errors:
+                click.echo(f"  • {error}")
+                
+    else:
+        click.echo("No budget data available - Budget analysis requires AWS Budgets to be configured")
     
     click.echo("\n" + "="*80)
     click.echo("Report complete. PDF generation will follow...")
