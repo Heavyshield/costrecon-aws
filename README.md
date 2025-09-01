@@ -44,36 +44,36 @@ pip install -e .
 
 ### Current Month Analysis (Default)
 ```bash
-costrecon
+python3 costrecon.py
 ```
 Analyzes the current month with 3-month trend analysis (current month + 2 previous months).
 
 ### Specific Month Analysis
 ```bash
 # January of current year
-costrecon --month jan
+python3 costrecon.py --month jan
 
 # Full month names work too
-costrecon --month january
+python3 costrecon.py --month january
 
 # Specify year explicitly
-costrecon --month jan2024
-costrecon --month february-2024
+python3 costrecon.py --month jan2024
+python3 costrecon.py --month february-2024
 
 # Previous months
-costrecon -m dec
+python3 costrecon.py -m dec
 ```
 
 ### Custom Output and AWS Settings
 ```bash
 # Specify output filename
-costrecon --month feb --output february_costs.pdf
+python3 costrecon.py --month feb --output february_costs.pdf
 
 # Use specific AWS profile and region
-costrecon --month jan --profile myprofile --region us-west-2
+python3 costrecon.py --month jan --profile myprofile --region us-west-2
 
 # Get help
-costrecon --help
+python3 costrecon.py --help
 ```
 
 ### Example Outputs
