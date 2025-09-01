@@ -83,6 +83,7 @@ class PDFReportGenerator:
         total_savings = report_data[1] if len(report_data) > 1 else {}
         sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
         rds_coverage = report_data[3] if len(report_data) > 3 else {}
+        quarterly_costs = report_data[4] if len(report_data) > 4 else {}
         
         # Extract current month coverage for backward compatibility
         sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
@@ -92,22 +93,26 @@ class PDFReportGenerator:
         # Title page
         story.extend(self._create_title_page(start_date, end_date))
         
-        # Executive summary
-        story.extend(self._create_executive_summary(cost_data, total_savings))
+        # 1. Executive summary
+        story.extend(self._create_executive_summary(cost_data, total_savings, quarterly_costs))
         
-        # Savings summary
+        # 2. Savings summary (with total and breakdown)
         story.extend(self._create_savings_summary(total_savings))
         
-        # Coverage summary
+        # 3. Savings Plan Coverage
         story.extend(self._create_coverage_summary(sp_coverage))
-        
-        # Trend analysis
         story.extend(self._create_trend_analysis(sp_coverage_with_trend))
         
-        # RDS coverage analysis
+        # 4. RDS Reservation Coverage
         story.extend(self._create_rds_coverage_summary(rds_coverage))
         
-        # Service details
+        # 5. Selected month total cost
+        story.extend(self._create_monthly_cost_summary(cost_data, quarterly_costs))
+        
+        # 6. Quarter total cost
+        story.extend(self._create_quarterly_cost_summary(quarterly_costs))
+        
+        # Service details (moved to end)
         story.extend(self._create_service_details(cost_data))
         
         # Build the PDF
@@ -140,7 +145,7 @@ class PDFReportGenerator:
         
         return story
     
-    def _create_executive_summary(self, cost_data: Dict, total_savings: Dict) -> List:
+    def _create_executive_summary(self, cost_data: Dict, total_savings: Dict, quarterly_costs: Dict) -> List:
         """Create executive summary section."""
         story = []
         
@@ -148,11 +153,13 @@ class PDFReportGenerator:
         
         # Calculate total costs
         total_cost = self._calculate_total_cost(cost_data)
+        quarterly_total = quarterly_costs.get('quarterly_total_cost', 0.0) if quarterly_costs else 0.0
         total_savings_amount = total_savings.get('total_savings', 0.0)
         
         summary_data = [
-            ["Total Cost", f"${total_cost:.2f}"],
-            ["Total Monthly Savings", f"${total_savings_amount:.2f}"],
+            ["Selected Month Cost", f"${total_cost:.2f}"],
+            ["Quarterly Total Cost (3 months)", f"${quarterly_total:.2f}"],
+            ["Monthly Savings", f"${total_savings_amount:.2f}"],
             ["Cost Optimization Rate", f"{(total_savings_amount/total_cost*100):.1f}%" if total_cost > 0 else "N/A"],
             ["Number of Services", str(len(cost_data.get('services', {}).get('DimensionValues', [])))],
             ["Report Period", f"{(cost_data['period']['end'] - cost_data['period']['start']).days} days" if cost_data.get('period') else "N/A"]
@@ -482,4 +489,118 @@ class PDFReportGenerator:
                 continue
         
         return total
+    
+    def _create_monthly_cost_summary(self, cost_data: Dict, quarterly_costs: Dict) -> List:
+        """Create selected month cost summary section."""
+        story = []
+        
+        story.append(Paragraph("Selected Month Cost Breakdown", self.custom_styles['SectionHeader']))
+        
+        monthly_cost = self._calculate_total_cost(cost_data)
+        
+        # Get service-level costs
+        service_costs = {}
+        if 'cost_data' in cost_data:
+            for result in cost_data['cost_data'].get('ResultsByTime', []):
+                for group in result.get('Groups', []):
+                    service_name = group.get('Keys', ['Unknown'])[0]
+                    amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
+                    
+                    if service_name in service_costs:
+                        service_costs[service_name] += amount
+                    else:
+                        service_costs[service_name] = amount
+        
+        # Create summary table
+        cost_data_table = [["Metric", "Value"]]
+        cost_data_table.append(["Selected Month Total", f"${monthly_cost:.2f}"])
+        cost_data_table.append(["Number of Services", str(len(service_costs))])
+        cost_data_table.append(["Average Daily Cost", f"${monthly_cost/30:.2f}"])
+        
+        cost_table = Table(cost_data_table, colWidths=[2.5*inch, 2*inch])
+        cost_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_light_blue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+        
+        story.append(cost_table)
+        story.append(Spacer(1, 20))
+        
+        return story
+    
+    def _create_quarterly_cost_summary(self, quarterly_costs: Dict) -> List:
+        """Create quarterly cost summary section."""
+        story = []
+        
+        story.append(Paragraph("Quarterly Cost Summary (3 Months)", self.custom_styles['SectionHeader']))
+        
+        if not quarterly_costs:
+            story.append(Paragraph("No quarterly cost data available.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        selected_month = quarterly_costs.get('selected_month_cost', 0.0)
+        month_minus_one = quarterly_costs.get('month_minus_one_cost', 0.0)
+        month_minus_two = quarterly_costs.get('month_minus_two_cost', 0.0)
+        quarterly_total = quarterly_costs.get('quarterly_total_cost', 0.0)
+        
+        quarterly_data = [
+            ["Period", "Cost", "% of Quarter"],
+            ["Selected Month", f"${selected_month:.2f}", f"{(selected_month/quarterly_total*100):.1f}%" if quarterly_total > 0 else "0.0%"],
+            ["Month -1", f"${month_minus_one:.2f}", f"{(month_minus_one/quarterly_total*100):.1f}%" if quarterly_total > 0 else "0.0%"],
+            ["Month -2", f"${month_minus_two:.2f}", f"{(month_minus_two/quarterly_total*100):.1f}%" if quarterly_total > 0 else "0.0%"],
+            ["QUARTERLY TOTAL", f"${quarterly_total:.2f}", "100.0%"]
+        ]
+        
+        quarterly_table = Table(quarterly_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
+        quarterly_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_orange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -2), self.amazon_gray),
+            ('BACKGROUND', (0, -1), (-1, -1), self.amazon_dark_blue),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+        
+        story.append(quarterly_table)
+        story.append(Spacer(1, 15))
+        
+        # Add quarterly insights
+        avg_monthly = quarterly_total / 3 if quarterly_total > 0 else 0
+        story.append(Paragraph("Quarterly Insights:", self.custom_styles['SubHeader']))
+        story.append(Paragraph(f"• Average monthly cost: ${avg_monthly:.2f}", self.styles['Normal']))
+        story.append(Paragraph(f"• Quarterly spending trend: {self._get_cost_trend(month_minus_two, month_minus_one, selected_month)}", self.styles['Normal']))
+        
+        story.append(Spacer(1, 20))
+        return story
+    
+    def _get_cost_trend(self, oldest: float, middle: float, newest: float) -> str:
+        """Analyze cost trend over three months."""
+        if oldest == 0 and middle == 0 and newest == 0:
+            return "No data available"
+        
+        if oldest > 0 and middle > 0 and newest > 0:
+            overall_change = ((newest - oldest) / oldest) * 100
+            
+            if overall_change > 5:
+                return f"Increasing ({overall_change:+.1f}% quarterly growth)"
+            elif overall_change < -5:
+                return f"Decreasing ({overall_change:+.1f}% quarterly decline)"
+            else:
+                return f"Stable ({overall_change:+.1f}% quarterly change)"
+        else:
+            return "Insufficient data for trend analysis"
     

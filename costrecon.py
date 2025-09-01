@@ -70,6 +70,43 @@ def parse_month_year(month_input: str, current_year: int = None) -> tuple:
     return start_date, end_date
 
 
+def calculate_quarterly_costs(selected_month_cost_data, month_one_cost_data, month_two_cost_data):
+    """Calculate quarterly cost aggregation from three months of cost data.
+    
+    Args:
+        selected_month_cost_data: Cost data for selected month
+        month_one_cost_data: Cost data for month -1
+        month_two_cost_data: Cost data for month -2
+    
+    Returns:
+        Dictionary containing quarterly cost totals and breakdown
+    """
+    def extract_total_cost(cost_data):
+        """Extract total cost from cost data structure."""
+        total = 0.0
+        if 'cost_data' in cost_data:
+            for result in cost_data['cost_data'].get('ResultsByTime', []):
+                total_cost_str = result.get('Total', {}).get('BlendedCost', {}).get('Amount', '0')
+                try:
+                    total += float(total_cost_str)
+                except ValueError:
+                    continue
+        return total
+    
+    selected_month_total = extract_total_cost(selected_month_cost_data)
+    month_one_total = extract_total_cost(month_one_cost_data)
+    month_two_total = extract_total_cost(month_two_cost_data)
+    
+    quarterly_total = selected_month_total + month_one_total + month_two_total
+    
+    return {
+        'selected_month_cost': selected_month_total,
+        'month_minus_one_cost': month_one_total,
+        'month_minus_two_cost': month_two_total,
+        'quarterly_total_cost': quarterly_total
+    }
+
+
 def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selected_month_coverage):
     """Calculate quarterly trend for savings plan coverage.
     
@@ -223,9 +260,29 @@ def cli(month, output, profile, region):
         # Report raw_data
         report_raw_data = []
 
-        # Fetch cost data for selected month
+        # Fetch cost data for all three months
         click.echo("Fetching cost data from AWS Cost Explorer...")
+        click.echo("  - Fetching cost data for selected month...")
         cost_data = cost_client_selected_month.get_cost_and_usage()
+        
+        click.echo("  - Fetching cost data for month -1...")
+        try:
+            cost_data_month_one = cost_client_month_one.get_cost_and_usage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            cost_data_month_one = {}
+        
+        click.echo("  - Fetching cost data for month -2...")
+        try:
+            cost_data_month_two = cost_client_month_two.get_cost_and_usage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            cost_data_month_two = {}
+        
+        # Calculate quarterly costs
+        click.echo("Calculating quarterly cost totals...")
+        quarterly_costs = calculate_quarterly_costs(cost_data, cost_data_month_one, cost_data_month_two)
+        
         report_raw_data.append(cost_data)
 
         # Fetch total savings for selected month
@@ -282,6 +339,9 @@ def cli(month, output, profile, region):
             click.echo(f"  Warning: {str(e)}")
             rds_coverage = {}
         report_raw_data.append(rds_coverage)
+        
+        # Add quarterly costs to report data
+        report_raw_data.append(quarterly_costs)
 
         # Print console report
         print_console_report(report_raw_data, start_date, end_date)
