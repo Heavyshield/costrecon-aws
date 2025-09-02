@@ -68,7 +68,8 @@ def print_console_report(report_data, start_date, end_date):
         
         click.echo("\nSavings Breakdown:")
         for source, amount in savings_breakdown:
-            if amount > 0:
+            # Always show Savings Plans, show others only if amount > 0
+            if amount > 0 or source == "Savings Plans":
                 percentage = (amount / total_amount * 100) if total_amount > 0 else 0
                 click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
         

@@ -98,7 +98,7 @@ class PDFReportGenerator:
         story.extend(self._create_executive_summary(cost_data, total_savings, quarterly_costs))
         
         # 2. Savings summary (with total and breakdown)
-        story.extend(self._create_savings_summary(total_savings))
+        story.extend(self._create_savings_summary(total_savings, sp_coverage))
         
         # 3. Savings Plan Coverage
         story.extend(self._create_coverage_summary(sp_coverage))
@@ -181,7 +181,7 @@ class PDFReportGenerator:
         
         return story
     
-    def _create_savings_summary(self, total_savings: Dict) -> List:
+    def _create_savings_summary(self, total_savings: Dict, sp_coverage: Dict = None) -> List:
         """Create savings summary section."""
         story = []
         
@@ -203,7 +203,8 @@ class PDFReportGenerator:
         ]
         
         for source, amount in savings_items:
-            if amount > 0:
+            # Always show Savings Plans, show others only if amount > 0
+            if amount > 0 or source == "Savings Plans":
                 percentage = (amount / total_amount * 100) if total_amount > 0 else 0
                 savings_data.append([source, f"${amount:.2f}", f"{percentage:.1f}%"])
         
