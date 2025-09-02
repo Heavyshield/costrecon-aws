@@ -4,7 +4,14 @@ import click
 
 
 def print_console_report(report_data, start_date, end_date):
-    """Print formatted cost report to console."""
+    """Print formatted cost report to console.
+    
+    Args:
+        report_data: List containing [cost_data, total_savings, sp_coverage_with_trend, 
+                    rds_coverage, quarterly_costs, budget_anomalies]
+        start_date: Report period start date (datetime object)
+        end_date: Report period end date (datetime object)
+    """
     click.echo("\n" + "="*80)
     click.echo("AWS COST RECONNAISSANCE REPORT".center(80))
     click.echo("="*80)

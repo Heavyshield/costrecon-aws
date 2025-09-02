@@ -4,6 +4,7 @@ import boto3
 from datetime import datetime
 from typing import Dict, List, Optional
 from botocore.exceptions import ClientError, NoCredentialsError
+from constants import AWS_SERVICES, SERVICE_DISPLAY_NAMES, DEFAULT_REGION, DEFAULT_GRANULARITY, COST_METRICS
 
 
 class CostExplorerClient:
@@ -37,6 +38,17 @@ class CostExplorerClient:
         else:
             raise Exception("start_date and end_date must be provided in parameters")
     
+    def _get_time_period(self) -> Dict[str, str]:
+        """Get formatted time period dict for API calls.
+        
+        Returns:
+            Dictionary with Start and End keys formatted for AWS API
+        """
+        return {
+            'Start': self.start_date.strftime('%Y-%m-%d'),
+            'End': self.end_date.strftime('%Y-%m-%d')
+        }
+    
     def get_saving_plan_coverage(self) -> Dict:
         """Get average Savings Plan coverage for the selected period.
         
@@ -45,10 +57,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_savings_plans_coverage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY'
             )
             
@@ -210,10 +219,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_savings_plans_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY'
             )
             
@@ -258,22 +264,23 @@ class CostExplorerClient:
         except Exception as e:
             raise Exception(f"Failed to fetch Savings Plans savings: {str(e)}")
     
-    def get_rds_savings(self) -> Dict:
-        """Get RDS Reserved Instance savings for the selected period.
+    def _get_reservation_savings(self, service_name: str, service_display_name: str) -> Dict:
+        """Generic method to get Reserved Instance savings for any service.
         
+        Args:
+            service_name: AWS service name for API filter
+            service_display_name: Display name for response
+            
         Returns:
-            Dictionary containing RDS RI savings data
+            Dictionary containing RI savings data
         """
         try:
             response = self.client.get_reservation_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
-                        'Values': ['Amazon Relational Database Service']
+                        'Values': [service_name]
                     }
                 },
                 Granularity='MONTHLY'
@@ -302,7 +309,7 @@ class CostExplorerClient:
                     'start': self.start_date,
                     'end': self.end_date
                 },
-                'service_type': 'RDS Reserved Instances'
+                'service_type': service_display_name
             }
             
         except ClientError as e:
@@ -312,13 +319,24 @@ class CostExplorerClient:
                     'total_savings': 0.0,
                     'detailed_utilization': [],
                     'period': {'start': self.start_date, 'end': self.end_date},
-                    'service_type': 'RDS Reserved Instances',
-                    'error': 'No RDS Reserved Instances found'
+                    'service_type': service_display_name,
+                    'error': f'No {service_display_name} found'
                 }
             else:
                 raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
         except Exception as e:
-            raise Exception(f"Failed to fetch RDS savings: {str(e)}")
+            raise Exception(f"Failed to fetch {service_display_name} savings: {str(e)}")
+    
+    def get_rds_savings(self) -> Dict:
+        """Get RDS Reserved Instance savings for the selected period.
+        
+        Returns:
+            Dictionary containing RDS RI savings data
+        """
+        return self._get_reservation_savings(
+            'Amazon Relational Database Service', 
+            'RDS Reserved Instances'
+        )
     
     def get_os_savings(self) -> Dict:
         """Get OpenSearch Reserved Instance savings for the selected period.
@@ -326,61 +344,10 @@ class CostExplorerClient:
         Returns:
             Dictionary containing OpenSearch RI savings data
         """
-        try:
-            response = self.client.get_reservation_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
-                Filter={
-                    'Dimensions': {
-                        'Key': 'SERVICE',
-                        'Values': ['Amazon OpenSearch Service']
-                    }
-                },
-                Granularity='MONTHLY'
-            )
-            
-            total_savings = 0.0
-            utilization_details = []
-            
-            for result in response.get('UtilizationsByTime', []):
-                savings_amount = float(result.get('Total', {}).get('NetRISavings', '0'))
-                total_savings += savings_amount
-                
-                utilization_details.append({
-                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
-                    'period_end': result.get('TimePeriod', {}).get('End', ''),
-                    'net_savings': round(savings_amount, 2),
-                    'utilization_percentage': float(result.get('Total', {}).get('UtilizationPercentage', '0')),
-                    'purchased_hours': result.get('Total', {}).get('PurchasedHours', '0'),
-                    'used_hours': result.get('Total', {}).get('UsedHours', '0')
-                })
-            
-            return {
-                'total_savings': round(total_savings, 2),
-                'detailed_utilization': utilization_details,
-                'period': {
-                    'start': self.start_date,
-                    'end': self.end_date
-                },
-                'service_type': 'OpenSearch Reserved Instances'
-            }
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'ValidationException':
-                return {
-                    'total_savings': 0.0,
-                    'detailed_utilization': [],
-                    'period': {'start': self.start_date, 'end': self.end_date},
-                    'service_type': 'OpenSearch Reserved Instances',
-                    'error': 'No OpenSearch Reserved Instances found'
-                }
-            else:
-                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
-        except Exception as e:
-            raise Exception(f"Failed to fetch OpenSearch savings: {str(e)}")
+        return self._get_reservation_savings(
+            'Amazon OpenSearch Service', 
+            'OpenSearch Reserved Instances'
+        )
     
     def get_total_savings(self) -> Dict:
         """Get total savings from all AWS cost optimization services.
@@ -451,10 +418,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_cost_and_usage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='DAILY',
                 Metrics=['BlendedCost'],
                 GroupBy=[
@@ -501,10 +465,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_cost_and_usage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY',
                 Metrics=['BlendedCost']
             )
@@ -523,10 +484,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_cost_and_usage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY',
                 Metrics=['BlendedCost'],
                 GroupBy=[
