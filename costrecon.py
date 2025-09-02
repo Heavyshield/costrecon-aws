@@ -7,6 +7,7 @@ import calendar
 from aws_client import CostExplorerClient
 from pdf_report_generator import PDFReportGenerator
 from cli_report_generator import print_console_report
+from constants import MONTH_MAPPINGS, DEFAULT_REGION
 
 
 def parse_month_year(month_input: str, current_year: int = None) -> tuple:
@@ -40,24 +41,13 @@ def parse_month_year(month_input: str, current_year: int = None) -> tuple:
                     pass
             break
     
-    # Month name mappings
-    month_names = {
-        'jan': 1, 'january': 1,
-        'feb': 2, 'february': 2,
-        'mar': 3, 'march': 3,
-        'apr': 4, 'april': 4,
-        'may': 5,
-        'jun': 6, 'june': 6,
-        'jul': 7, 'july': 7,
-        'aug': 8, 'august': 8,
-        'sep': 9, 'september': 9, 'sept': 9,
-        'oct': 10, 'october': 10,
-        'nov': 11, 'november': 11,
-        'dec': 12, 'december': 12
-    }
+    # Use month mappings from constants
+    month_names = MONTH_MAPPINGS.copy()
+    # Add common abbreviation for September
+    month_names['sept'] = 9
     
     if month_str not in month_names:
-        available_months = ', '.join(sorted(month_names.keys()))
+        available_months = ', '.join(sorted(MONTH_MAPPINGS.keys()))
         raise click.BadParameter(f"Invalid month '{month_str}'. Available: {available_months}")
     
     month_num = month_names[month_str]
@@ -199,7 +189,7 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
 @click.option('--output', '-o', default='cost_report.pdf', 
               help='Output PDF filename. Default: cost_report.pdf')
 @click.option('--profile', help='AWS profile to use. Uses default profile if not specified.')
-@click.option('--region', default='us-east-1', help='AWS region. Default: us-east-1')
+@click.option('--region', default=DEFAULT_REGION, help=f'AWS region. Default: {DEFAULT_REGION}')
 def cli(month, output, profile, region):
     """Extract AWS cost data for a specific month and generate comprehensive PDF report.
     

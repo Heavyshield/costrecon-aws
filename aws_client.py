@@ -10,7 +10,7 @@ from constants import AWS_SERVICES, SERVICE_DISPLAY_NAMES, DEFAULT_REGION, DEFAU
 class CostExplorerClient:
     """Client for interacting with AWS Cost Explorer API."""
     
-    def __init__(self, profile: Optional[str] = None, region: str = 'eu-west-1', parameters: Optional[Dict] = None):
+    def __init__(self, profile: Optional[str] = None, region: str = DEFAULT_REGION, parameters: Optional[Dict] = None):
         """Initialize the Cost Explorer client.
         
         Args:
@@ -58,7 +58,7 @@ class CostExplorerClient:
         try:
             response = self.client.get_savings_plans_coverage(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             # Calculate average coverage percentage
@@ -112,10 +112,10 @@ class CostExplorerClient:
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
-                        'Values': ['Amazon Relational Database Service']
+                        'Values': [AWS_SERVICES['RDS']]
                     }
                 },
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             # Calculate average coverage percentages
@@ -160,10 +160,10 @@ class CostExplorerClient:
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
-                        'Values': ['Amazon Relational Database Service']
+                        'Values': [AWS_SERVICES['RDS']]
                     }
                 },
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             utilization_details = []
@@ -199,7 +199,7 @@ class CostExplorerClient:
                     'start': self.start_date,
                     'end': self.end_date
                 },
-                'service': 'Amazon Relational Database Service'
+                'service': AWS_SERVICES['RDS']
             }
             
         except ClientError as e:
@@ -220,7 +220,7 @@ class CostExplorerClient:
         try:
             response = self.client.get_savings_plans_utilization(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             total_savings = 0.0
@@ -283,7 +283,7 @@ class CostExplorerClient:
                         'Values': [service_name]
                     }
                 },
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             total_savings = 0.0
@@ -334,8 +334,8 @@ class CostExplorerClient:
             Dictionary containing RDS RI savings data
         """
         return self._get_reservation_savings(
-            'Amazon Relational Database Service', 
-            'RDS Reserved Instances'
+            AWS_SERVICES['RDS'], 
+            SERVICE_DISPLAY_NAMES['RDS']
         )
     
     def get_os_savings(self) -> Dict:
@@ -345,8 +345,8 @@ class CostExplorerClient:
             Dictionary containing OpenSearch RI savings data
         """
         return self._get_reservation_savings(
-            'Amazon OpenSearch Service', 
-            'OpenSearch Reserved Instances'
+            AWS_SERVICES['OPENSEARCH'], 
+            SERVICE_DISPLAY_NAMES['OPENSEARCH']
         )
     
     def get_total_savings(self) -> Dict:
@@ -411,7 +411,7 @@ class CostExplorerClient:
     def get_cost_and_usage(self) -> Dict:
         """Fetch cost and usage data from AWS Cost Explorer.
         Uses class-level start_date and end_date.
-        Returns BlendedCost data with SERVICE grouping.
+        Returns cost data with SERVICE grouping using configured metrics.
         
         Returns:
             Dictionary containing cost and usage data
@@ -420,7 +420,7 @@ class CostExplorerClient:
             response = self.client.get_cost_and_usage(
                 TimePeriod=self._get_time_period(),
                 Granularity='DAILY',
-                Metrics=['BlendedCost'],
+                Metrics=COST_METRICS,
                 GroupBy=[
                     {
                         'Type': 'DIMENSION',
@@ -466,7 +466,7 @@ class CostExplorerClient:
         try:
             response = self.client.get_cost_and_usage(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY',
+                Granularity=DEFAULT_GRANULARITY,
                 Metrics=['BlendedCost']
             )
             
@@ -485,8 +485,8 @@ class CostExplorerClient:
         try:
             response = self.client.get_cost_and_usage(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY',
-                Metrics=['BlendedCost'],
+                Granularity=DEFAULT_GRANULARITY,
+                Metrics=COST_METRICS,
                 GroupBy=[
                     {
                         'Type': 'DIMENSION',

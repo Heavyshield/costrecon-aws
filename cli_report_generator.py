@@ -1,6 +1,7 @@
 """CLI console report generator for CostRecon."""
 
 import click
+from constants import REPORT_WIDTH, SECTION_SEPARATOR
 
 
 def print_console_report(report_data, start_date, end_date):
@@ -12,11 +13,11 @@ def print_console_report(report_data, start_date, end_date):
         start_date: Report period start date (datetime object)
         end_date: Report period end date (datetime object)
     """
-    click.echo("\n" + "="*80)
-    click.echo("AWS COST RECONNAISSANCE REPORT".center(80))
-    click.echo("="*80)
+    click.echo("\n" + SECTION_SEPARATOR)
+    click.echo("AWS COST RECONNAISSANCE REPORT".center(REPORT_WIDTH))
+    click.echo(SECTION_SEPARATOR)
     click.echo(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-    click.echo("="*80)
+    click.echo(SECTION_SEPARATOR)
     
     # Parse report data (expecting list with cost_data, total_savings, sp_coverage_with_trend, rds_coverage, quarterly_costs, budget_anomalies)
     cost_data = report_data[0] if len(report_data) > 0 else {}
@@ -276,6 +277,6 @@ def print_console_report(report_data, start_date, end_date):
     else:
         click.echo("No budget data available - Budget analysis requires AWS Budgets to be configured")
     
-    click.echo("\n" + "="*80)
+    click.echo("\n" + SECTION_SEPARATOR)
     click.echo("Report complete. PDF generation will follow...")
-    click.echo("="*80 + "\n")
+    click.echo(SECTION_SEPARATOR + "\n")
