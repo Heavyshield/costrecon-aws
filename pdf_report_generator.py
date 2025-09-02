@@ -1,11 +1,11 @@
 """PDF report generator for AWS cost data."""
 
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.platypus.flowables import HRFlowable
 from datetime import datetime
 from typing import Dict, List
@@ -84,6 +84,7 @@ class PDFReportGenerator:
         sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
         rds_coverage = report_data[3] if len(report_data) > 3 else {}
         quarterly_costs = report_data[4] if len(report_data) > 4 else {}
+        budget_anomalies = report_data[5] if len(report_data) > 5 else {}
         
         # Extract current month coverage for backward compatibility
         sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
@@ -97,7 +98,7 @@ class PDFReportGenerator:
         story.extend(self._create_executive_summary(cost_data, total_savings, quarterly_costs))
         
         # 2. Savings summary (with total and breakdown)
-        story.extend(self._create_savings_summary(total_savings))
+        story.extend(self._create_savings_summary(total_savings, sp_coverage))
         
         # 3. Savings Plan Coverage
         story.extend(self._create_coverage_summary(sp_coverage))
@@ -106,14 +107,12 @@ class PDFReportGenerator:
         # 4. RDS Reservation Coverage
         story.extend(self._create_rds_coverage_summary(rds_coverage))
         
-        # 5. Selected month total cost
-        story.extend(self._create_monthly_cost_summary(cost_data, quarterly_costs))
-        
-        # 6. Quarter total cost
+        # 5. Quarter total cost
         story.extend(self._create_quarterly_cost_summary(quarterly_costs))
         
-        # Service details (moved to end)
-        story.extend(self._create_service_details(cost_data))
+        # 7. Budget Anomalies (at the end)
+        story.extend(self._create_budget_anomalies_summary(budget_anomalies))
+        
         
         # Build the PDF
         doc.build(story)
@@ -182,7 +181,7 @@ class PDFReportGenerator:
         
         return story
     
-    def _create_savings_summary(self, total_savings: Dict) -> List:
+    def _create_savings_summary(self, total_savings: Dict, sp_coverage: Dict = None) -> List:
         """Create savings summary section."""
         story = []
         
@@ -199,14 +198,13 @@ class PDFReportGenerator:
         
         savings_items = [
             ("Savings Plans", total_savings.get('savings_plans', 0)),
-            ("EC2 Reservations", total_savings.get('ec2_reservations', 0)),
             ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
-            ("MAP/Rightsizing", total_savings.get('map_savings', 0))
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0))
         ]
         
         for source, amount in savings_items:
-            if amount > 0:
+            # Always show Savings Plans, show others only if amount > 0
+            if amount > 0 or source == "Savings Plans":
                 percentage = (amount / total_amount * 100) if total_amount > 0 else 0
                 savings_data.append([source, f"${amount:.2f}", f"{percentage:.1f}%"])
         
@@ -390,13 +388,11 @@ class PDFReportGenerator:
             return story
         
         hours_coverage = rds_coverage.get('average_hours_coverage_percentage', 0)
-        cost_coverage = rds_coverage.get('average_cost_coverage_percentage', 0)
         utilization = rds_coverage.get('average_utilization_percentage', 0)
         
         coverage_data = [
             ["Metric", "Value", "Status"],
             ["Hours Coverage", f"{hours_coverage:.1f}%", self._get_coverage_status(hours_coverage)],
-            ["Cost Coverage", f"{cost_coverage:.1f}%", self._get_coverage_status(cost_coverage)],
             ["Utilization Rate", f"{utilization:.1f}%", self._get_utilization_status(utilization)]
         ]
         
@@ -442,39 +438,6 @@ class PDFReportGenerator:
         else:
             return "Poor"
     
-    def _create_service_details(self, cost_data: Dict) -> List:
-        """Create service details section."""
-        story = []
-        
-        story.append(Paragraph("Service Breakdown", self.custom_styles['SectionHeader']))
-        
-        services = cost_data.get('services', {}).get('DimensionValues', [])
-        
-        if services:
-            table_data = [["Service", "Description"]]
-            for service in services[:20]:  # Limit to top 20 services
-                service_name = service.get('Value', 'Unknown')
-                table_data.append([service_name, service.get('Attributes', {}).get('description', 'N/A')])
-            
-            service_table = Table(table_data, colWidths=[2.5*inch, 3.5*inch])
-            service_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.amazon_light_blue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
-                ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP')
-            ]))
-            
-            story.append(service_table)
-        else:
-            story.append(Paragraph("No service data available.", self.styles['Normal']))
-        
-        return story
-    
     def _calculate_total_cost(self, cost_data: Dict) -> float:
         """Calculate total cost from cost data."""
         total = 0.0
@@ -482,58 +445,12 @@ class PDFReportGenerator:
         cost_results = cost_data.get('cost_data', {}).get('ResultsByTime', [])
         
         for result in cost_results:
-            total_cost = result.get('Total', {}).get('BlendedCost', {}).get('Amount', '0')
-            try:
-                total += float(total_cost)
-            except ValueError:
-                continue
+            # With SERVICE grouping, sum across all groups
+            for group in result.get('Groups', []):
+                amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
+                total += amount
         
         return total
-    
-    def _create_monthly_cost_summary(self, cost_data: Dict, quarterly_costs: Dict) -> List:
-        """Create selected month cost summary section."""
-        story = []
-        
-        story.append(Paragraph("Selected Month Cost Breakdown", self.custom_styles['SectionHeader']))
-        
-        monthly_cost = self._calculate_total_cost(cost_data)
-        
-        # Get service-level costs
-        service_costs = {}
-        if 'cost_data' in cost_data:
-            for result in cost_data['cost_data'].get('ResultsByTime', []):
-                for group in result.get('Groups', []):
-                    service_name = group.get('Keys', ['Unknown'])[0]
-                    amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
-                    
-                    if service_name in service_costs:
-                        service_costs[service_name] += amount
-                    else:
-                        service_costs[service_name] = amount
-        
-        # Create summary table
-        cost_data_table = [["Metric", "Value"]]
-        cost_data_table.append(["Selected Month Total", f"${monthly_cost:.2f}"])
-        cost_data_table.append(["Number of Services", str(len(service_costs))])
-        cost_data_table.append(["Average Daily Cost", f"${monthly_cost/30:.2f}"])
-        
-        cost_table = Table(cost_data_table, colWidths=[2.5*inch, 2*inch])
-        cost_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_light_blue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
-            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
-        ]))
-        
-        story.append(cost_table)
-        story.append(Spacer(1, 20))
-        
-        return story
     
     def _create_quarterly_cost_summary(self, quarterly_costs: Dict) -> List:
         """Create quarterly cost summary section."""
@@ -603,4 +520,125 @@ class PDFReportGenerator:
                 return f"Stable ({overall_change:+.1f}% quarterly change)"
         else:
             return "Insufficient data for trend analysis"
+    
+    def _create_budget_anomalies_summary(self, budget_anomalies: Dict) -> List:
+        """Create budget anomalies summary section."""
+        story = []
+        
+        story.append(Paragraph("Budget Anomalies Analysis", self.custom_styles['SectionHeader']))
+        
+        if not budget_anomalies or 'anomaly_budgets' not in budget_anomalies:
+            story.append(Paragraph("No budget data available - Budget analysis requires AWS Budgets to be configured.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        anomaly_budgets = budget_anomalies.get('anomaly_budgets', [])
+        total_checked = budget_anomalies.get('total_budgets_checked', 0)
+        anomalies_found = budget_anomalies.get('anomalies_found', 0)
+        threshold = budget_anomalies.get('threshold_percentage', 10.0)
+        
+        # Summary statistics
+        summary_data = [
+            ["Metric", "Value"],
+            ["Total Budgets Checked", str(total_checked)],
+            ["Anomalies Found", str(anomalies_found)],
+            ["Threshold Used", f"{threshold}%"],
+            ["Budget Health", "GOOD" if anomalies_found == 0 else "REQUIRES ATTENTION"]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[2.5*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_orange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+        
+        story.append(summary_table)
+        story.append(Spacer(1, 15))
+        
+        # Detailed anomalies if any
+        if anomaly_budgets:
+            story.append(Paragraph("Budget Anomalies Details:", self.custom_styles['SubHeader']))
+            
+            # Create detailed table
+            anomalies_data = [["Budget Name", "Limit", "Actual", "Above Target", "Severity"]]
+            
+            for budget in anomaly_budgets:
+                budget_name = budget.get('budget_name', 'Unknown')[:25]  # Truncate long names
+                budget_limit = budget.get('budget_limit', 0)
+                actual_amount = budget.get('actual_amount', 0)
+                above_target = budget.get('actual_above_target', 0)
+                severity = budget.get('severity', 'LOW')
+                currency = budget.get('currency', 'USD')
+                
+                anomalies_data.append([
+                    budget_name,
+                    f"{currency} {budget_limit:.0f}",
+                    f"{currency} {actual_amount:.0f}",
+                    f"{currency} {above_target:.0f}",
+                    severity
+                ])
+            
+            anomalies_table = Table(anomalies_data, colWidths=[2*inch, 1*inch, 1*inch, 1*inch, 0.8*inch])
+            anomalies_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.amazon_dark_blue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+                ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP')
+            ]))
+            
+            # Color code severity
+            for i, budget in enumerate(anomaly_budgets, 1):
+                severity = budget.get('severity', 'LOW')
+                if severity == 'CRITICAL':
+                    anomalies_table.setStyle(TableStyle([('BACKGROUND', (4, i), (4, i), colors.red)]))
+                elif severity == 'HIGH':
+                    anomalies_table.setStyle(TableStyle([('BACKGROUND', (4, i), (4, i), colors.orange)]))
+                elif severity == 'MEDIUM':
+                    anomalies_table.setStyle(TableStyle([('BACKGROUND', (4, i), (4, i), colors.yellow)]))
+            
+            story.append(anomalies_table)
+            story.append(Spacer(1, 15))
+            
+            # Recommendations
+            story.append(Paragraph("Recommendations:", self.custom_styles['SubHeader']))
+            
+            critical_budgets = [b for b in anomaly_budgets if b.get('severity') == 'CRITICAL']
+            high_budgets = [b for b in anomaly_budgets if b.get('severity') == 'HIGH']
+            
+            if critical_budgets:
+                story.append(Paragraph(f"• {len(critical_budgets)} budget(s) in CRITICAL state - immediate attention required", self.styles['Normal']))
+            if high_budgets:
+                story.append(Paragraph(f"• {len(high_budgets)} budget(s) in HIGH state - review spending patterns", self.styles['Normal']))
+            
+            if not critical_budgets and not high_budgets:
+                story.append(Paragraph("• Monitor budget trends closely to prevent future overages", self.styles['Normal']))
+            
+            story.append(Paragraph("• Consider adjusting budget limits or implementing cost controls", self.styles['Normal']))
+        else:
+            story.append(Paragraph("✅ All budgets are within acceptable thresholds.", self.styles['Normal']))
+        
+        # Add errors if any
+        errors = budget_anomalies.get('errors', [])
+        if errors:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph("Budget Analysis Errors:", self.custom_styles['SubHeader']))
+            for error in errors:
+                story.append(Paragraph(f"• {error}", self.styles['Normal']))
+        
+        story.append(Spacer(1, 20))
+        return story
     

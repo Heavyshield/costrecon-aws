@@ -4,6 +4,7 @@ import boto3
 from datetime import datetime
 from typing import Dict, List, Optional
 from botocore.exceptions import ClientError, NoCredentialsError
+from constants import AWS_SERVICES, SERVICE_DISPLAY_NAMES, DEFAULT_REGION, DEFAULT_GRANULARITY, COST_METRICS
 
 
 class CostExplorerClient:
@@ -21,8 +22,10 @@ class CostExplorerClient:
             if profile:
                 session = boto3.Session(profile_name=profile)
                 self.client = session.client('ce', region_name=region)
+                self.budgets_client = session.client('budgets', region_name=region)
             else:
                 self.client = boto3.client('ce', region_name=region)
+                self.budgets_client = boto3.client('budgets', region_name=region)
         except NoCredentialsError:
             raise Exception("AWS credentials not found. Please configure your AWS credentials.")
         except Exception as e:
@@ -35,6 +38,17 @@ class CostExplorerClient:
         else:
             raise Exception("start_date and end_date must be provided in parameters")
     
+    def _get_time_period(self) -> Dict[str, str]:
+        """Get formatted time period dict for API calls.
+        
+        Returns:
+            Dictionary with Start and End keys formatted for AWS API
+        """
+        return {
+            'Start': self.start_date.strftime('%Y-%m-%d'),
+            'End': self.end_date.strftime('%Y-%m-%d')
+        }
+    
     def get_saving_plan_coverage(self) -> Dict:
         """Get average Savings Plan coverage for the selected period.
         
@@ -43,10 +57,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_savings_plans_coverage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY'
             )
             
@@ -54,8 +65,8 @@ class CostExplorerClient:
             total_coverage = 0.0
             total_periods = 0
             
-            for result in response.get('SavingsPlansUtilizations', []):
-                coverage_percentage = float(result.get('Coverage', {}).get('CoverageHoursPercentage', '0'))
+            for result in response.get('SavingsPlansCoverages', []):
+                coverage_percentage = float(result.get('Coverage', {}).get('CoveragePercentage', '0'))
                 total_coverage += coverage_percentage
                 total_periods += 1
             
@@ -63,7 +74,7 @@ class CostExplorerClient:
             
             return {
                 'average_coverage_percentage': round(average_coverage, 2),
-                'detailed_coverage': response.get('SavingsPlansUtilizations', []),
+                'detailed_coverage': response.get('SavingsPlansCoverages', []),
                 'period': {
                     'start': self.start_date,
                     'end': self.end_date
@@ -200,191 +211,198 @@ class CostExplorerClient:
         except Exception as e:
             raise Exception(f"Failed to fetch RDS coverage data: {str(e)}")
     
-    def get_total_savings(self) -> Dict:
-        """Get total savings from all AWS cost optimization services.
-        
-        Aggregates savings from:
-        1. Savings Plans utilization
-        2. RDS Reserved Instances  
-        3. OpenSearch Reserved Instances
-        4. EC2 Reserved Instances
-        5. MAP (Migration Acceleration Program) savings
+    def get_sp_savings(self) -> Dict:
+        """Get Savings Plans savings for the selected period.
         
         Returns:
-            Dictionary containing total savings breakdown
+            Dictionary containing Savings Plans savings data
+        """
+        try:
+            response = self.client.get_savings_plans_utilization(
+                TimePeriod=self._get_time_period(),
+                Granularity='MONTHLY'
+            )
+            
+            total_savings = 0.0
+            utilization_details = []
+            
+            for result in response.get('SavingsPlansUtilizationsByTime', []):
+                savings_amount = float(result.get('Savings', {}).get('NetSavings', '0'))
+                total_savings += savings_amount
+                
+                utilization_details.append({
+                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                    'period_end': result.get('TimePeriod', {}).get('End', ''),
+                    'net_savings': round(savings_amount, 2),
+                    'utilization_percentage': float(result.get('Utilization', {}).get('UtilizationPercentage', '0')),
+                    'total_commitment': result.get('Utilization', {}).get('TotalCommitment', '0'),
+                    'used_commitment': result.get('Utilization', {}).get('UsedCommitment', '0')
+                })
+            
+            return {
+                'total_savings': round(total_savings, 2),
+                'detailed_utilization': utilization_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'service_type': 'Savings Plans'
+            }
+            
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'DataUnavailableException':
+                return {
+                    'total_savings': 0.0,
+                    'detailed_utilization': [],
+                    'period': {'start': self.start_date, 'end': self.end_date},
+                    'service_type': 'Savings Plans',
+                    'error': 'No Savings Plans data available for this period'
+                }
+            else:
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch Savings Plans savings: {str(e)}")
+    
+    def _get_reservation_savings(self, service_name: str, service_display_name: str) -> Dict:
+        """Generic method to get Reserved Instance savings for any service.
+        
+        Args:
+            service_name: AWS service name for API filter
+            service_display_name: Display name for response
+            
+        Returns:
+            Dictionary containing RI savings data
+        """
+        try:
+            response = self.client.get_reservation_utilization(
+                TimePeriod=self._get_time_period(),
+                Filter={
+                    'Dimensions': {
+                        'Key': 'SERVICE',
+                        'Values': [service_name]
+                    }
+                },
+                Granularity='MONTHLY'
+            )
+            
+            total_savings = 0.0
+            utilization_details = []
+            
+            for result in response.get('UtilizationsByTime', []):
+                savings_amount = float(result.get('Total', {}).get('NetRISavings', '0'))
+                total_savings += savings_amount
+                
+                utilization_details.append({
+                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                    'period_end': result.get('TimePeriod', {}).get('End', ''),
+                    'net_savings': round(savings_amount, 2),
+                    'utilization_percentage': float(result.get('Total', {}).get('UtilizationPercentage', '0')),
+                    'purchased_hours': result.get('Total', {}).get('PurchasedHours', '0'),
+                    'used_hours': result.get('Total', {}).get('UsedHours', '0')
+                })
+            
+            return {
+                'total_savings': round(total_savings, 2),
+                'detailed_utilization': utilization_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'service_type': service_display_name
+            }
+            
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ValidationException':
+                return {
+                    'total_savings': 0.0,
+                    'detailed_utilization': [],
+                    'period': {'start': self.start_date, 'end': self.end_date},
+                    'service_type': service_display_name,
+                    'error': f'No {service_display_name} found'
+                }
+            else:
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch {service_display_name} savings: {str(e)}")
+    
+    def get_rds_savings(self) -> Dict:
+        """Get RDS Reserved Instance savings for the selected period.
+        
+        Returns:
+            Dictionary containing RDS RI savings data
+        """
+        return self._get_reservation_savings(
+            'Amazon Relational Database Service', 
+            'RDS Reserved Instances'
+        )
+    
+    def get_os_savings(self) -> Dict:
+        """Get OpenSearch Reserved Instance savings for the selected period.
+        
+        Returns:
+            Dictionary containing OpenSearch RI savings data
+        """
+        return self._get_reservation_savings(
+            'Amazon OpenSearch Service', 
+            'OpenSearch Reserved Instances'
+        )
+    
+    def get_total_savings(self) -> Dict:
+        """Get total savings from all AWS cost optimization services.
+        Uses individual service functions for better modularity.
+        
+        Returns:
+            Dictionary containing total savings breakdown with detailed data
         """
         savings_breakdown = {
             'savings_plans': 0.0,
             'rds_reservations': 0.0, 
             'opensearch_reservations': 0.0,
-            'ec2_reservations': 0.0,
-            'map_savings': 0.0,
             'total_savings': 0.0,
             'period': {
                 'start': self.start_date,
                 'end': self.end_date
             },
+            'detailed_savings': {},
             'errors': []
         }
         
-        # 1. Get Savings Plans utilization and savings
+        # 1. Get Savings Plans savings
         try:
-            sp_response = self.client.get_savings_plans_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
-                Granularity='MONTHLY'
-            )
-            
-            sp_savings = 0.0
-            for result in sp_response.get('SavingsPlansUtilizations', []):
-                savings_amount = float(result.get('Savings', {}).get('NetSavings', '0'))
-                sp_savings += savings_amount
-            
-            savings_breakdown['savings_plans'] = round(sp_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'DataUnavailableException':
-                savings_breakdown['errors'].append("Savings Plans: No Savings Plans data available for this period")
-            else:
-                savings_breakdown['errors'].append(f"Savings Plans: {e.response['Error']['Message']}")
+            sp_data = self.get_sp_savings()
+            savings_breakdown['savings_plans'] = sp_data['total_savings']
+            savings_breakdown['detailed_savings']['savings_plans'] = sp_data
+            if 'error' in sp_data:
+                savings_breakdown['errors'].append(f"Savings Plans: {sp_data['error']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"Savings Plans: {str(e)}")
         
         # 2. Get RDS Reserved Instance savings
         try:
-            rds_response = self.client.get_reservation_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
-                Filter={
-                    'Dimensions': {
-                        'Key': 'SERVICE',
-                        'Values': ['Amazon Relational Database Service']
-                    }
-                },
-                Granularity='MONTHLY'
-            )
-            
-            rds_savings = 0.0
-            for result in rds_response.get('UtilizationsByTime', []):
-                total_savings = result.get('Total', {}).get('NetRISavings', '0')
-                rds_savings += float(total_savings)
-            
-            savings_breakdown['rds_reservations'] = round(rds_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'ValidationException':
-                savings_breakdown['errors'].append("RDS Reservations: No RDS Reserved Instances found")
-            else:
-                savings_breakdown['errors'].append(f"RDS Reservations: {e.response['Error']['Message']}")
+            rds_data = self.get_rds_savings()
+            savings_breakdown['rds_reservations'] = rds_data['total_savings']
+            savings_breakdown['detailed_savings']['rds_reservations'] = rds_data
+            if 'error' in rds_data:
+                savings_breakdown['errors'].append(f"RDS Reservations: {rds_data['error']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"RDS Reservations: {str(e)}")
         
         # 3. Get OpenSearch Reserved Instance savings
         try:
-            opensearch_response = self.client.get_reservation_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
-                Filter={
-                    'Dimensions': {
-                        'Key': 'SERVICE',
-                        'Values': ['Amazon OpenSearch Service']
-                    }
-                },
-                Granularity='MONTHLY'
-            )
-            
-            opensearch_savings = 0.0
-            for result in opensearch_response.get('UtilizationsByTime', []):
-                total_savings = result.get('Total', {}).get('NetRISavings', '0')
-                opensearch_savings += float(total_savings)
-            
-            savings_breakdown['opensearch_reservations'] = round(opensearch_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'ValidationException':
-                savings_breakdown['errors'].append("OpenSearch Reservations: No OpenSearch Reserved Instances found")
-            else:
-                savings_breakdown['errors'].append(f"OpenSearch Reservations: {e.response['Error']['Message']}")
+            os_data = self.get_os_savings()
+            savings_breakdown['opensearch_reservations'] = os_data['total_savings']
+            savings_breakdown['detailed_savings']['opensearch_reservations'] = os_data
+            if 'error' in os_data:
+                savings_breakdown['errors'].append(f"OpenSearch Reservations: {os_data['error']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"OpenSearch Reservations: {str(e)}")
-        
-        # 4. Get EC2 Reserved Instance savings
-        try:
-            ec2_response = self.client.get_reservation_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
-                Filter={
-                    'Dimensions': {
-                        'Key': 'SERVICE',
-                        'Values': ['Amazon Elastic Compute Cloud - Compute']
-                    }
-                },
-                Granularity='MONTHLY'
-            )
-            
-            ec2_savings = 0.0
-            for result in ec2_response.get('UtilizationsByTime', []):
-                total_savings = result.get('Total', {}).get('NetRISavings', '0')
-                ec2_savings += float(total_savings)
-            
-            savings_breakdown['ec2_reservations'] = round(ec2_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'ValidationException':
-                savings_breakdown['errors'].append("EC2 Reservations: No EC2 Reserved Instances found")
-            else:
-                savings_breakdown['errors'].append(f"EC2 Reservations: {e.response['Error']['Message']}")
-        except Exception as e:
-            savings_breakdown['errors'].append(f"EC2 Reservations: {str(e)}")
-        
-        # 5. Get MAP savings (using rightsizing recommendations as proxy)
-        try:
-            rightsizing_response = self.client.get_rightsizing_recommendation(
-                Service='EC2',
-                Configuration={
-                    'BenefitsConsidered': False,
-                    'RecommendationTarget': 'SAME_INSTANCE_FAMILY'
-                }
-            )
-            
-            map_savings = 0.0
-            for recommendation in rightsizing_response.get('RightsizingRecommendations', []):
-                estimated_savings = float(
-                    recommendation.get('EstimatedMonthlySavings', '0')
-                )
-                map_savings += estimated_savings
-            
-            savings_breakdown['map_savings'] = round(map_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'AccessDeniedException':
-                savings_breakdown['errors'].append("MAP/Rightsizing: Feature not enabled - can be enabled in Cost Explorer Preferences")
-            elif error_code == 'DataUnavailableException':
-                savings_breakdown['errors'].append("MAP/Rightsizing: No rightsizing recommendations available yet (requires 24h+ data)")
-            else:
-                savings_breakdown['errors'].append(f"MAP/Rightsizing: {e.response['Error']['Message']}")
-        except Exception as e:
-            savings_breakdown['errors'].append(f"MAP/Rightsizing: {str(e)}")
         
         # Calculate total savings
         total = (savings_breakdown['savings_plans'] + 
                 savings_breakdown['rds_reservations'] +
-                savings_breakdown['opensearch_reservations'] + 
-                savings_breakdown['ec2_reservations'] +
-                savings_breakdown['map_savings'])
+                savings_breakdown['opensearch_reservations'])
         
         savings_breakdown['total_savings'] = round(total, 2)
         
@@ -393,18 +411,16 @@ class CostExplorerClient:
     def get_cost_and_usage(self) -> Dict:
         """Fetch cost and usage data from AWS Cost Explorer.
         Uses class-level start_date and end_date.
+        Returns BlendedCost data with SERVICE grouping.
         
         Returns:
             Dictionary containing cost and usage data
         """
         try:
             response = self.client.get_cost_and_usage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='DAILY',
-                Metrics=['BlendedCost', 'UnblendedCost', 'UsageQuantity'],
+                Metrics=['BlendedCost'],
                 GroupBy=[
                     {
                         'Type': 'DIMENSION',
@@ -449,10 +465,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_cost_and_usage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY',
                 Metrics=['BlendedCost']
             )
@@ -471,10 +484,7 @@ class CostExplorerClient:
         """
         try:
             response = self.client.get_cost_and_usage(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
+                TimePeriod=self._get_time_period(),
                 Granularity='MONTHLY',
                 Metrics=['BlendedCost'],
                 GroupBy=[
@@ -489,3 +499,149 @@ class CostExplorerClient:
             
         except Exception as e:
             raise Exception(f"Failed to fetch service costs: {str(e)}")
+
+    def get_budgets_anomalies(self, threshold: float = 10.0) -> Dict:
+        """Get budgets where forecasted costs are above threshold percentage of target budget.
+        
+        Args:
+            threshold: Percentage threshold above budget limit to flag as anomaly (default: 10%)
+        
+        Returns:
+            Dictionary containing budget anomalies with target and forecast values
+        """
+        try:
+            # Get account ID for budgets API calls
+            sts_client = boto3.client('sts')
+            account_id = sts_client.get_caller_identity()['Account']
+            
+            # Get all budgets
+            budgets_response = self.budgets_client.describe_budgets(
+                AccountId=account_id
+            )
+            
+            budget_anomalies = {
+                'anomaly_budgets': [],
+                'total_budgets_checked': 0,
+                'anomalies_found': 0,
+                'threshold_percentage': threshold,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'errors': []
+            }
+            
+            for budget in budgets_response.get('Budgets', []):
+                budget_anomalies['total_budgets_checked'] += 1
+                budget_name = budget.get('BudgetName', 'Unknown')
+                
+                try:
+                    # Get budget performance (actual and forecasted costs)
+                    performance_response = self.budgets_client.describe_budget_performance_history(
+                        AccountId=account_id,
+                        BudgetName=budget_name,
+                        TimePeriod={
+                            'Start': self.start_date,
+                            'End': self.end_date
+                        }
+                    )
+                    
+                    # Extract budget limit
+                    budget_limit = 0.0
+                    if 'BudgetLimit' in budget:
+                        budget_limit = float(budget['BudgetLimit'].get('Amount', '0'))
+                    
+                    # Get latest performance data
+                    performance_history = performance_response.get('BudgetPerformanceHistory', {})
+                    budget_performance = performance_history.get('BudgetedAndActualAmountsList', [])
+                    
+                    if budget_performance:
+                        latest_performance = budget_performance[-1]  # Most recent period
+                        
+                        # Extract forecasted amount
+                        forecasted_amount = 0.0
+                        if 'BudgetedAmount' in latest_performance:
+                            forecasted_amount = float(latest_performance['BudgetedAmount'].get('Amount', '0'))
+                        
+                        # Extract actual amount
+                        actual_amount = 0.0
+                        if 'ActualAmount' in latest_performance:
+                            actual_amount = float(latest_performance['ActualAmount'].get('Amount', '0'))
+                        
+                        # Calculate if forecast exceeds threshold
+                        if budget_limit > 0:
+                            threshold_amount = budget_limit * (1 + threshold / 100)
+                            forecast_percentage = (forecasted_amount / budget_limit) * 100 if budget_limit > 0 else 0
+                            actual_percentage = (actual_amount / budget_limit) * 100 if budget_limit > 0 else 0
+                            
+                            # Calculate amounts above target budget
+                            actual_above_target = max(actual_amount - budget_limit, 0)
+                            forecast_above_target = max(forecasted_amount - budget_limit, 0)
+                            
+                            # Calculate percentages above target
+                            actual_above_target_pct = ((actual_amount - budget_limit) / budget_limit * 100) if budget_limit > 0 and actual_amount > budget_limit else 0
+                            forecast_above_target_pct = ((forecasted_amount - budget_limit) / budget_limit * 100) if budget_limit > 0 and forecasted_amount > budget_limit else 0
+                            
+                            # Check if forecast exceeds threshold
+                            if forecasted_amount > threshold_amount or actual_amount > threshold_amount:
+                                budget_anomalies['anomaly_budgets'].append({
+                                    'budget_name': budget_name,
+                                    'budget_limit': budget_limit,
+                                    'actual_amount': actual_amount,
+                                    'forecasted_amount': forecasted_amount,
+                                    'actual_percentage': round(actual_percentage, 2),
+                                    'forecast_percentage': round(forecast_percentage, 2),
+                                    'actual_above_target': round(actual_above_target, 2),
+                                    'forecast_above_target': round(forecast_above_target, 2),
+                                    'actual_above_target_percentage': round(actual_above_target_pct, 2),
+                                    'forecast_above_target_percentage': round(forecast_above_target_pct, 2),
+                                    'threshold_exceeded': forecasted_amount > threshold_amount or actual_amount > threshold_amount,
+                                    'excess_amount': round(max(forecasted_amount - budget_limit, actual_amount - budget_limit, 0), 2),
+                                    'budget_type': budget.get('BudgetType', 'COST'),
+                                    'time_unit': budget.get('TimeUnit', 'MONTHLY'),
+                                    'currency': budget.get('BudgetLimit', {}).get('Unit', 'USD'),
+                                    'severity': self._calculate_budget_severity(actual_above_target_pct, forecast_above_target_pct, threshold)
+                                })
+                                budget_anomalies['anomalies_found'] += 1
+                    
+                except ClientError as e:
+                    error_code = e.response['Error']['Code']
+                    if error_code == 'AccessDeniedException':
+                        budget_anomalies['errors'].append(f"Budget '{budget_name}': Access denied to budget performance data")
+                    else:
+                        budget_anomalies['errors'].append(f"Budget '{budget_name}': {e.response['Error']['Message']}")
+                except Exception as e:
+                    budget_anomalies['errors'].append(f"Budget '{budget_name}': {str(e)}")
+            
+            return budget_anomalies
+            
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'AccessDeniedException':
+                raise Exception("Access denied. Please ensure your AWS credentials have Budgets permissions (budgets:DescribeBudgets, budgets:DescribeBudgetPerformanceHistory)")
+            else:
+                raise Exception(f"AWS Budgets API Error: {e.response['Error']['Message']}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch budget anomalies: {str(e)}")
+    
+    def _calculate_budget_severity(self, actual_above_pct: float, forecast_above_pct: float, threshold: float) -> str:
+        """Calculate severity level of budget anomaly.
+        
+        Args:
+            actual_above_pct: Percentage actual amount is above budget
+            forecast_above_pct: Percentage forecast amount is above budget
+            threshold: Configured threshold percentage
+        
+        Returns:
+            Severity level: 'CRITICAL', 'HIGH', 'MEDIUM', or 'LOW'
+        """
+        max_overage = max(actual_above_pct, forecast_above_pct)
+        
+        if max_overage >= threshold * 3:  # 3x threshold
+            return 'CRITICAL'
+        elif max_overage >= threshold * 2:  # 2x threshold
+            return 'HIGH'
+        elif max_overage >= threshold:  # At threshold
+            return 'MEDIUM'
+        else:
+            return 'LOW'
