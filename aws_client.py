@@ -220,7 +220,7 @@ class CostExplorerClient:
             total_savings = 0.0
             utilization_details = []
             
-            for result in response.get('SavingsPlansUtilizations', []):
+            for result in response.get('SavingsPlansUtilizationsByTime', []):
                 savings_amount = float(result.get('Savings', {}).get('NetSavings', '0'))
                 total_savings += savings_amount
                 
