@@ -86,15 +86,10 @@ def calculate_quarterly_costs(selected_month_cost_data, month_one_cost_data, mon
         total = 0.0
         if 'cost_data' in cost_data:
             for result in cost_data['cost_data'].get('ResultsByTime', []):
-                total_data = result.get('Total', {})
-                
-                # Use BlendedCost 
-                total_cost_str = total_data.get('BlendedCost', {}).get('Amount', '0')
-                
-                try:
-                    total += float(total_cost_str)
-                except ValueError:
-                    continue
+                # With SERVICE grouping, sum across all groups
+                for group in result.get('Groups', []):
+                    amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
+                    total += amount
         return total
     
     selected_month_total = extract_total_cost(selected_month_cost_data)
