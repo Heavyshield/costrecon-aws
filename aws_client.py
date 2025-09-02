@@ -395,6 +395,7 @@ class CostExplorerClient:
     def get_cost_and_usage(self) -> Dict:
         """Fetch cost and usage data from AWS Cost Explorer.
         Uses class-level start_date and end_date.
+        Excludes tax charges and returns UnblendedCost and NetAmortizedCost.
         
         Returns:
             Dictionary containing cost and usage data
@@ -406,13 +407,7 @@ class CostExplorerClient:
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
                 Granularity='DAILY',
-                Metrics=['BlendedCost', 'UnblendedCost', 'UsageQuantity'],
-                GroupBy=[
-                    {
-                        'Type': 'DIMENSION',
-                        'Key': 'SERVICE'
-                    }
-                ]
+                Metrics=['NetAmortizedCost']
             )
             
             # Also get dimension values for services

@@ -86,7 +86,11 @@ def calculate_quarterly_costs(selected_month_cost_data, month_one_cost_data, mon
         total = 0.0
         if 'cost_data' in cost_data:
             for result in cost_data['cost_data'].get('ResultsByTime', []):
-                total_cost_str = result.get('Total', {}).get('BlendedCost', {}).get('Amount', '0')
+                total_data = result.get('Total', {})
+                
+                # Use NetAmortizedCost only
+                total_cost_str = total_data.get('NetAmortizedCost', {}).get('Amount', '0')
+                
                 try:
                     total += float(total_cost_str)
                 except ValueError:
@@ -263,7 +267,7 @@ def cli(month, output, profile, region):
         # Fetch cost data for all three months
         click.echo("Fetching cost data from AWS Cost Explorer...")
         click.echo("  - Fetching cost data for selected month...")
-        cost_data = cost_client_selected_month.get_cost_and_usage()
+        cost_data_month_zero = cost_client_selected_month.get_cost_and_usage()
         
         click.echo("  - Fetching cost data for month -1...")
         try:
@@ -281,9 +285,9 @@ def cli(month, output, profile, region):
         
         # Calculate quarterly costs
         click.echo("Calculating quarterly cost totals...")
-        quarterly_costs = calculate_quarterly_costs(cost_data, cost_data_month_one, cost_data_month_two)
+        quarterly_costs = calculate_quarterly_costs(cost_data_month_zero, cost_data_month_one, cost_data_month_two)
         
-        report_raw_data.append(cost_data)
+        report_raw_data.append(cost_data_month_zero)
 
         # Fetch total savings for selected month
         click.echo("Fetching total savings from AWS Cost Explorer...")
