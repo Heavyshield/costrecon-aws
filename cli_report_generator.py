@@ -62,10 +62,8 @@ def print_console_report(report_data, start_date, end_date):
         
         savings_breakdown = [
             ("Savings Plans", total_savings.get('savings_plans', 0)),
-            ("EC2 Reservations", total_savings.get('ec2_reservations', 0)),
             ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
-            ("MAP/Rightsizing", total_savings.get('map_savings', 0))
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0))
         ]
         
         click.echo("\nSavings Breakdown:")
@@ -140,11 +138,9 @@ def print_console_report(report_data, start_date, end_date):
     
     if rds_coverage and 'average_hours_coverage_percentage' in rds_coverage:
         hours_coverage = rds_coverage.get('average_hours_coverage_percentage', 0)
-        cost_coverage = rds_coverage.get('average_cost_coverage_percentage', 0)
         utilization = rds_coverage.get('average_utilization_percentage', 0)
         
         click.echo(f"Hours Coverage: {hours_coverage:.1f}%")
-        click.echo(f"Cost Coverage: {cost_coverage:.1f}%")
         click.echo(f"Utilization Rate: {utilization:.1f}%")
         
         if hours_coverage < 50:

@@ -203,10 +203,8 @@ class PDFReportGenerator:
         
         savings_items = [
             ("Savings Plans", total_savings.get('savings_plans', 0)),
-            ("EC2 Reservations", total_savings.get('ec2_reservations', 0)),
             ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
-            ("MAP/Rightsizing", total_savings.get('map_savings', 0))
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0))
         ]
         
         for source, amount in savings_items:
@@ -394,13 +392,11 @@ class PDFReportGenerator:
             return story
         
         hours_coverage = rds_coverage.get('average_hours_coverage_percentage', 0)
-        cost_coverage = rds_coverage.get('average_cost_coverage_percentage', 0)
         utilization = rds_coverage.get('average_utilization_percentage', 0)
         
         coverage_data = [
             ["Metric", "Value", "Status"],
             ["Hours Coverage", f"{hours_coverage:.1f}%", self._get_coverage_status(hours_coverage)],
-            ["Cost Coverage", f"{cost_coverage:.1f}%", self._get_coverage_status(cost_coverage)],
             ["Utilization Rate", f"{utilization:.1f}%", self._get_utilization_status(utilization)]
         ]
         

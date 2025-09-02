@@ -88,8 +88,8 @@ def calculate_quarterly_costs(selected_month_cost_data, month_one_cost_data, mon
             for result in cost_data['cost_data'].get('ResultsByTime', []):
                 total_data = result.get('Total', {})
                 
-                # Use NetAmortizedCost only
-                total_cost_str = total_data.get('NetAmortizedCost', {}).get('Amount', '0')
+                # Use BlendedCost 
+                total_cost_str = total_data.get('BlendedCost', {}).get('Amount', '0')
                 
                 try:
                     total += float(total_cost_str)

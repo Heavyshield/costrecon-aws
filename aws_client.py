@@ -56,8 +56,8 @@ class CostExplorerClient:
             total_coverage = 0.0
             total_periods = 0
             
-            for result in response.get('SavingsPlansUtilizations', []):
-                coverage_percentage = float(result.get('Coverage', {}).get('CoverageHoursPercentage', '0'))
+            for result in response.get('SavingsPlansCoverages', []):
+                coverage_percentage = float(result.get('Coverage', {}).get('CoveragePercentage', '0'))
                 total_coverage += coverage_percentage
                 total_periods += 1
             
@@ -65,7 +65,7 @@ class CostExplorerClient:
             
             return {
                 'average_coverage_percentage': round(average_coverage, 2),
-                'detailed_coverage': response.get('SavingsPlansUtilizations', []),
+                'detailed_coverage': response.get('SavingsPlansCoverages', []),
                 'period': {
                     'start': self.start_date,
                     'end': self.end_date
@@ -202,36 +202,14 @@ class CostExplorerClient:
         except Exception as e:
             raise Exception(f"Failed to fetch RDS coverage data: {str(e)}")
     
-    def get_total_savings(self) -> Dict:
-        """Get total savings from all AWS cost optimization services.
-        
-        Aggregates savings from:
-        1. Savings Plans utilization
-        2. RDS Reserved Instances  
-        3. OpenSearch Reserved Instances
-        4. EC2 Reserved Instances
-        5. MAP (Migration Acceleration Program) savings
+    def get_sp_savings(self) -> Dict:
+        """Get Savings Plans savings for the selected period.
         
         Returns:
-            Dictionary containing total savings breakdown
+            Dictionary containing Savings Plans savings data
         """
-        savings_breakdown = {
-            'savings_plans': 0.0,
-            'rds_reservations': 0.0, 
-            'opensearch_reservations': 0.0,
-            'ec2_reservations': 0.0,
-            'map_savings': 0.0,
-            'total_savings': 0.0,
-            'period': {
-                'start': self.start_date,
-                'end': self.end_date
-            },
-            'errors': []
-        }
-        
-        # 1. Get Savings Plans utilization and savings
         try:
-            sp_response = self.client.get_savings_plans_utilization(
+            response = self.client.get_savings_plans_utilization(
                 TimePeriod={
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
@@ -239,25 +217,55 @@ class CostExplorerClient:
                 Granularity='MONTHLY'
             )
             
-            sp_savings = 0.0
-            for result in sp_response.get('SavingsPlansUtilizations', []):
-                savings_amount = float(result.get('Savings', {}).get('NetSavings', '0'))
-                sp_savings += savings_amount
+            total_savings = 0.0
+            utilization_details = []
             
-            savings_breakdown['savings_plans'] = round(sp_savings, 2)
+            for result in response.get('SavingsPlansUtilizations', []):
+                savings_amount = float(result.get('Savings', {}).get('NetSavings', '0'))
+                total_savings += savings_amount
+                
+                utilization_details.append({
+                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                    'period_end': result.get('TimePeriod', {}).get('End', ''),
+                    'net_savings': round(savings_amount, 2),
+                    'utilization_percentage': float(result.get('Utilization', {}).get('UtilizationPercentage', '0')),
+                    'total_commitment': result.get('Utilization', {}).get('TotalCommitment', '0'),
+                    'used_commitment': result.get('Utilization', {}).get('UsedCommitment', '0')
+                })
+            
+            return {
+                'total_savings': round(total_savings, 2),
+                'detailed_utilization': utilization_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'service_type': 'Savings Plans'
+            }
             
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == 'DataUnavailableException':
-                savings_breakdown['errors'].append("Savings Plans: No Savings Plans data available for this period")
+                return {
+                    'total_savings': 0.0,
+                    'detailed_utilization': [],
+                    'period': {'start': self.start_date, 'end': self.end_date},
+                    'service_type': 'Savings Plans',
+                    'error': 'No Savings Plans data available for this period'
+                }
             else:
-                savings_breakdown['errors'].append(f"Savings Plans: {e.response['Error']['Message']}")
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
         except Exception as e:
-            savings_breakdown['errors'].append(f"Savings Plans: {str(e)}")
+            raise Exception(f"Failed to fetch Savings Plans savings: {str(e)}")
+    
+    def get_rds_savings(self) -> Dict:
+        """Get RDS Reserved Instance savings for the selected period.
         
-        # 2. Get RDS Reserved Instance savings
+        Returns:
+            Dictionary containing RDS RI savings data
+        """
         try:
-            rds_response = self.client.get_reservation_utilization(
+            response = self.client.get_reservation_utilization(
                 TimePeriod={
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
@@ -271,25 +279,55 @@ class CostExplorerClient:
                 Granularity='MONTHLY'
             )
             
-            rds_savings = 0.0
-            for result in rds_response.get('UtilizationsByTime', []):
-                total_savings = result.get('Total', {}).get('NetRISavings', '0')
-                rds_savings += float(total_savings)
+            total_savings = 0.0
+            utilization_details = []
             
-            savings_breakdown['rds_reservations'] = round(rds_savings, 2)
+            for result in response.get('UtilizationsByTime', []):
+                savings_amount = float(result.get('Total', {}).get('NetRISavings', '0'))
+                total_savings += savings_amount
+                
+                utilization_details.append({
+                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                    'period_end': result.get('TimePeriod', {}).get('End', ''),
+                    'net_savings': round(savings_amount, 2),
+                    'utilization_percentage': float(result.get('Total', {}).get('UtilizationPercentage', '0')),
+                    'purchased_hours': result.get('Total', {}).get('PurchasedHours', '0'),
+                    'used_hours': result.get('Total', {}).get('UsedHours', '0')
+                })
+            
+            return {
+                'total_savings': round(total_savings, 2),
+                'detailed_utilization': utilization_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'service_type': 'RDS Reserved Instances'
+            }
             
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == 'ValidationException':
-                savings_breakdown['errors'].append("RDS Reservations: No RDS Reserved Instances found")
+                return {
+                    'total_savings': 0.0,
+                    'detailed_utilization': [],
+                    'period': {'start': self.start_date, 'end': self.end_date},
+                    'service_type': 'RDS Reserved Instances',
+                    'error': 'No RDS Reserved Instances found'
+                }
             else:
-                savings_breakdown['errors'].append(f"RDS Reservations: {e.response['Error']['Message']}")
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
         except Exception as e:
-            savings_breakdown['errors'].append(f"RDS Reservations: {str(e)}")
+            raise Exception(f"Failed to fetch RDS savings: {str(e)}")
+    
+    def get_os_savings(self) -> Dict:
+        """Get OpenSearch Reserved Instance savings for the selected period.
         
-        # 3. Get OpenSearch Reserved Instance savings
+        Returns:
+            Dictionary containing OpenSearch RI savings data
+        """
         try:
-            opensearch_response = self.client.get_reservation_utilization(
+            response = self.client.get_reservation_utilization(
                 TimePeriod={
                     'Start': self.start_date.strftime('%Y-%m-%d'),
                     'End': self.end_date.strftime('%Y-%m-%d')
@@ -303,90 +341,101 @@ class CostExplorerClient:
                 Granularity='MONTHLY'
             )
             
-            opensearch_savings = 0.0
-            for result in opensearch_response.get('UtilizationsByTime', []):
-                total_savings = result.get('Total', {}).get('NetRISavings', '0')
-                opensearch_savings += float(total_savings)
+            total_savings = 0.0
+            utilization_details = []
             
-            savings_breakdown['opensearch_reservations'] = round(opensearch_savings, 2)
+            for result in response.get('UtilizationsByTime', []):
+                savings_amount = float(result.get('Total', {}).get('NetRISavings', '0'))
+                total_savings += savings_amount
+                
+                utilization_details.append({
+                    'period_start': result.get('TimePeriod', {}).get('Start', ''),
+                    'period_end': result.get('TimePeriod', {}).get('End', ''),
+                    'net_savings': round(savings_amount, 2),
+                    'utilization_percentage': float(result.get('Total', {}).get('UtilizationPercentage', '0')),
+                    'purchased_hours': result.get('Total', {}).get('PurchasedHours', '0'),
+                    'used_hours': result.get('Total', {}).get('UsedHours', '0')
+                })
+            
+            return {
+                'total_savings': round(total_savings, 2),
+                'detailed_utilization': utilization_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'service_type': 'OpenSearch Reserved Instances'
+            }
             
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == 'ValidationException':
-                savings_breakdown['errors'].append("OpenSearch Reservations: No OpenSearch Reserved Instances found")
+                return {
+                    'total_savings': 0.0,
+                    'detailed_utilization': [],
+                    'period': {'start': self.start_date, 'end': self.end_date},
+                    'service_type': 'OpenSearch Reserved Instances',
+                    'error': 'No OpenSearch Reserved Instances found'
+                }
             else:
-                savings_breakdown['errors'].append(f"OpenSearch Reservations: {e.response['Error']['Message']}")
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch OpenSearch savings: {str(e)}")
+    
+    def get_total_savings(self) -> Dict:
+        """Get total savings from all AWS cost optimization services.
+        Uses individual service functions for better modularity.
+        
+        Returns:
+            Dictionary containing total savings breakdown with detailed data
+        """
+        savings_breakdown = {
+            'savings_plans': 0.0,
+            'rds_reservations': 0.0, 
+            'opensearch_reservations': 0.0,
+            'total_savings': 0.0,
+            'period': {
+                'start': self.start_date,
+                'end': self.end_date
+            },
+            'detailed_savings': {},
+            'errors': []
+        }
+        
+        # 1. Get Savings Plans savings
+        try:
+            sp_data = self.get_sp_savings()
+            savings_breakdown['savings_plans'] = sp_data['total_savings']
+            savings_breakdown['detailed_savings']['savings_plans'] = sp_data
+            if 'error' in sp_data:
+                savings_breakdown['errors'].append(f"Savings Plans: {sp_data['error']}")
+        except Exception as e:
+            savings_breakdown['errors'].append(f"Savings Plans: {str(e)}")
+        
+        # 2. Get RDS Reserved Instance savings
+        try:
+            rds_data = self.get_rds_savings()
+            savings_breakdown['rds_reservations'] = rds_data['total_savings']
+            savings_breakdown['detailed_savings']['rds_reservations'] = rds_data
+            if 'error' in rds_data:
+                savings_breakdown['errors'].append(f"RDS Reservations: {rds_data['error']}")
+        except Exception as e:
+            savings_breakdown['errors'].append(f"RDS Reservations: {str(e)}")
+        
+        # 3. Get OpenSearch Reserved Instance savings
+        try:
+            os_data = self.get_os_savings()
+            savings_breakdown['opensearch_reservations'] = os_data['total_savings']
+            savings_breakdown['detailed_savings']['opensearch_reservations'] = os_data
+            if 'error' in os_data:
+                savings_breakdown['errors'].append(f"OpenSearch Reservations: {os_data['error']}")
         except Exception as e:
             savings_breakdown['errors'].append(f"OpenSearch Reservations: {str(e)}")
-        
-        # 4. Get EC2 Reserved Instance savings
-        try:
-            ec2_response = self.client.get_reservation_utilization(
-                TimePeriod={
-                    'Start': self.start_date.strftime('%Y-%m-%d'),
-                    'End': self.end_date.strftime('%Y-%m-%d')
-                },
-                Filter={
-                    'Dimensions': {
-                        'Key': 'SERVICE',
-                        'Values': ['Amazon Elastic Compute Cloud - Compute']
-                    }
-                },
-                Granularity='MONTHLY'
-            )
-            
-            ec2_savings = 0.0
-            for result in ec2_response.get('UtilizationsByTime', []):
-                total_savings = result.get('Total', {}).get('NetRISavings', '0')
-                ec2_savings += float(total_savings)
-            
-            savings_breakdown['ec2_reservations'] = round(ec2_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'ValidationException':
-                savings_breakdown['errors'].append("EC2 Reservations: No EC2 Reserved Instances found")
-            else:
-                savings_breakdown['errors'].append(f"EC2 Reservations: {e.response['Error']['Message']}")
-        except Exception as e:
-            savings_breakdown['errors'].append(f"EC2 Reservations: {str(e)}")
-        
-        # 5. Get MAP savings (using rightsizing recommendations as proxy)
-        try:
-            rightsizing_response = self.client.get_rightsizing_recommendation(
-                Service='EC2',
-                Configuration={
-                    'BenefitsConsidered': False,
-                    'RecommendationTarget': 'SAME_INSTANCE_FAMILY'
-                }
-            )
-            
-            map_savings = 0.0
-            for recommendation in rightsizing_response.get('RightsizingRecommendations', []):
-                estimated_savings = float(
-                    recommendation.get('EstimatedMonthlySavings', '0')
-                )
-                map_savings += estimated_savings
-            
-            savings_breakdown['map_savings'] = round(map_savings, 2)
-            
-        except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == 'AccessDeniedException':
-                savings_breakdown['errors'].append("MAP/Rightsizing: Feature not enabled - can be enabled in Cost Explorer Preferences")
-            elif error_code == 'DataUnavailableException':
-                savings_breakdown['errors'].append("MAP/Rightsizing: No rightsizing recommendations available yet (requires 24h+ data)")
-            else:
-                savings_breakdown['errors'].append(f"MAP/Rightsizing: {e.response['Error']['Message']}")
-        except Exception as e:
-            savings_breakdown['errors'].append(f"MAP/Rightsizing: {str(e)}")
         
         # Calculate total savings
         total = (savings_breakdown['savings_plans'] + 
                 savings_breakdown['rds_reservations'] +
-                savings_breakdown['opensearch_reservations'] + 
-                savings_breakdown['ec2_reservations'] +
-                savings_breakdown['map_savings'])
+                savings_breakdown['opensearch_reservations'])
         
         savings_breakdown['total_savings'] = round(total, 2)
         
@@ -395,7 +444,7 @@ class CostExplorerClient:
     def get_cost_and_usage(self) -> Dict:
         """Fetch cost and usage data from AWS Cost Explorer.
         Uses class-level start_date and end_date.
-        Excludes tax charges and returns UnblendedCost and NetAmortizedCost.
+        Returns BlendedCost data with SERVICE grouping.
         
         Returns:
             Dictionary containing cost and usage data
@@ -407,7 +456,13 @@ class CostExplorerClient:
                     'End': self.end_date.strftime('%Y-%m-%d')
                 },
                 Granularity='DAILY',
-                Metrics=['NetAmortizedCost']
+                Metrics=['BlendedCost'],
+                GroupBy=[
+                    {
+                        'Type': 'DIMENSION',
+                        'Key': 'SERVICE'
+                    }
+                ]
             )
             
             # Also get dimension values for services
