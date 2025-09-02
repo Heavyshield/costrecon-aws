@@ -107,17 +107,12 @@ class PDFReportGenerator:
         # 4. RDS Reservation Coverage
         story.extend(self._create_rds_coverage_summary(rds_coverage))
         
-        # 5. Selected month total cost
-        story.extend(self._create_monthly_cost_summary(cost_data, quarterly_costs))
-        
-        # 6. Quarter total cost
+        # 5. Quarter total cost
         story.extend(self._create_quarterly_cost_summary(quarterly_costs))
         
         # 7. Budget Anomalies (at the end)
         story.extend(self._create_budget_anomalies_summary(budget_anomalies))
         
-        # Service details (moved to end)
-        story.extend(self._create_service_details(cost_data))
         
         # Build the PDF
         doc.build(story)
@@ -442,39 +437,6 @@ class PDFReportGenerator:
         else:
             return "Poor"
     
-    def _create_service_details(self, cost_data: Dict) -> List:
-        """Create service details section."""
-        story = []
-        
-        story.append(Paragraph("Service Breakdown", self.custom_styles['SectionHeader']))
-        
-        services = cost_data.get('services', {}).get('DimensionValues', [])
-        
-        if services:
-            table_data = [["Service", "Description"]]
-            for service in services[:20]:  # Limit to top 20 services
-                service_name = service.get('Value', 'Unknown')
-                table_data.append([service_name, service.get('Attributes', {}).get('description', 'N/A')])
-            
-            service_table = Table(table_data, colWidths=[2.5*inch, 3.5*inch])
-            service_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.amazon_light_blue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
-                ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP')
-            ]))
-            
-            story.append(service_table)
-        else:
-            story.append(Paragraph("No service data available.", self.styles['Normal']))
-        
-        return story
-    
     def _calculate_total_cost(self, cost_data: Dict) -> float:
         """Calculate total cost from cost data."""
         total = 0.0
@@ -482,58 +444,12 @@ class PDFReportGenerator:
         cost_results = cost_data.get('cost_data', {}).get('ResultsByTime', [])
         
         for result in cost_results:
-            total_cost = result.get('Total', {}).get('BlendedCost', {}).get('Amount', '0')
-            try:
-                total += float(total_cost)
-            except ValueError:
-                continue
+            # With SERVICE grouping, sum across all groups
+            for group in result.get('Groups', []):
+                amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
+                total += amount
         
         return total
-    
-    def _create_monthly_cost_summary(self, cost_data: Dict, quarterly_costs: Dict) -> List:
-        """Create selected month cost summary section."""
-        story = []
-        
-        story.append(Paragraph("Selected Month Cost Breakdown", self.custom_styles['SectionHeader']))
-        
-        monthly_cost = self._calculate_total_cost(cost_data)
-        
-        # Get service-level costs
-        service_costs = {}
-        if 'cost_data' in cost_data:
-            for result in cost_data['cost_data'].get('ResultsByTime', []):
-                for group in result.get('Groups', []):
-                    service_name = group.get('Keys', ['Unknown'])[0]
-                    amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
-                    
-                    if service_name in service_costs:
-                        service_costs[service_name] += amount
-                    else:
-                        service_costs[service_name] = amount
-        
-        # Create summary table
-        cost_data_table = [["Metric", "Value"]]
-        cost_data_table.append(["Selected Month Total", f"${monthly_cost:.2f}"])
-        cost_data_table.append(["Number of Services", str(len(service_costs))])
-        cost_data_table.append(["Average Daily Cost", f"${monthly_cost/30:.2f}"])
-        
-        cost_table = Table(cost_data_table, colWidths=[2.5*inch, 2*inch])
-        cost_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_light_blue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
-            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
-        ]))
-        
-        story.append(cost_table)
-        story.append(Spacer(1, 20))
-        
-        return story
     
     def _create_quarterly_cost_summary(self, quarterly_costs: Dict) -> List:
         """Create quarterly cost summary section."""

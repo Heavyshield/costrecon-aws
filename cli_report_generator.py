@@ -167,14 +167,6 @@ def print_console_report(report_data, start_date, end_date):
     click.echo(f"Number of Services: {len(service_costs)}")
     click.echo(f"Average Daily Cost: ${total_cost/30:.2f}")
     
-    # Top services by cost
-    if service_costs:
-        click.echo("\nTop Services by Cost:")
-        sorted_services = sorted(service_costs.items(), key=lambda x: x[1], reverse=True)[:10]
-        for service, cost in sorted_services:
-            percentage = (cost / total_cost * 100) if total_cost > 0 else 0
-            click.echo(f"  • {service[:40]:<40} ${cost:>8.2f} ({percentage:>5.1f}%)")
-    
     # 6. QUARTER TOTAL COST
     click.echo("\n📊 QUARTERLY COST SUMMARY (3 MONTHS)")
     click.echo("-" * 40)
