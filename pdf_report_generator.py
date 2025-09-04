@@ -199,12 +199,13 @@ class PDFReportGenerator:
         savings_items = [
             ("Savings Plans", total_savings.get('savings_plans', 0)),
             ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0))
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
+            ("Credit Savings", total_savings.get('credit_savings', 0))
         ]
         
         for source, amount in savings_items:
-            # Always show Savings Plans, show others only if amount > 0
-            if amount > 0 or source == "Savings Plans":
+            # Always show Savings Plans and Credit Savings, show others only if amount > 0
+            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
                 percentage = (amount / total_amount * 100) if total_amount > 0 else 0
                 savings_data.append([source, f"${amount:.2f}", f"{percentage:.1f}%"])
         

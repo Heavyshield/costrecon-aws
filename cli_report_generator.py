@@ -1,6 +1,7 @@
 """CLI console report generator for CostRecon."""
 
 import click
+from constants import REPORT_WIDTH, SECTION_SEPARATOR
 
 
 def print_console_report(report_data, start_date, end_date):
@@ -12,11 +13,11 @@ def print_console_report(report_data, start_date, end_date):
         start_date: Report period start date (datetime object)
         end_date: Report period end date (datetime object)
     """
-    click.echo("\n" + "="*80)
-    click.echo("AWS COST RECONNAISSANCE REPORT".center(80))
-    click.echo("="*80)
+    click.echo("\n" + SECTION_SEPARATOR)
+    click.echo("AWS COST RECONNAISSANCE REPORT".center(REPORT_WIDTH))
+    click.echo(SECTION_SEPARATOR)
     click.echo(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-    click.echo("="*80)
+    click.echo(SECTION_SEPARATOR)
     
     # Parse report data (expecting list with cost_data, total_savings, sp_coverage_with_trend, rds_coverage, quarterly_costs, budget_anomalies)
     cost_data = report_data[0] if len(report_data) > 0 else {}
@@ -70,13 +71,14 @@ def print_console_report(report_data, start_date, end_date):
         savings_breakdown = [
             ("Savings Plans", total_savings.get('savings_plans', 0)),
             ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0))
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
+            ("Credit Savings", total_savings.get('credit_savings', 0))
         ]
         
         click.echo("\nSavings Breakdown:")
         for source, amount in savings_breakdown:
-            # Always show Savings Plans, show others only if amount > 0
-            if amount > 0 or source == "Savings Plans":
+            # Always show Savings Plans and Credit Savings, show others only if amount > 0
+            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
                 percentage = (amount / total_amount * 100) if total_amount > 0 else 0
                 click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
         
@@ -276,6 +278,6 @@ def print_console_report(report_data, start_date, end_date):
     else:
         click.echo("No budget data available - Budget analysis requires AWS Budgets to be configured")
     
-    click.echo("\n" + "="*80)
+    click.echo("\n" + SECTION_SEPARATOR)
     click.echo("Report complete. PDF generation will follow...")
-    click.echo("="*80 + "\n")
+    click.echo(SECTION_SEPARATOR + "\n")

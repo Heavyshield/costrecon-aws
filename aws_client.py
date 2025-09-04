@@ -10,7 +10,7 @@ from constants import AWS_SERVICES, SERVICE_DISPLAY_NAMES, DEFAULT_REGION, DEFAU
 class CostExplorerClient:
     """Client for interacting with AWS Cost Explorer API."""
     
-    def __init__(self, profile: Optional[str] = None, region: str = 'eu-west-1', parameters: Optional[Dict] = None):
+    def __init__(self, profile: Optional[str] = None, region: str = DEFAULT_REGION, parameters: Optional[Dict] = None):
         """Initialize the Cost Explorer client.
         
         Args:
@@ -58,7 +58,7 @@ class CostExplorerClient:
         try:
             response = self.client.get_savings_plans_coverage(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             # Calculate average coverage percentage
@@ -112,10 +112,10 @@ class CostExplorerClient:
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
-                        'Values': ['Amazon Relational Database Service']
+                        'Values': [AWS_SERVICES['RDS']]
                     }
                 },
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             # Calculate average coverage percentages
@@ -160,10 +160,10 @@ class CostExplorerClient:
                 Filter={
                     'Dimensions': {
                         'Key': 'SERVICE',
-                        'Values': ['Amazon Relational Database Service']
+                        'Values': [AWS_SERVICES['RDS']]
                     }
                 },
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             utilization_details = []
@@ -199,7 +199,7 @@ class CostExplorerClient:
                     'start': self.start_date,
                     'end': self.end_date
                 },
-                'service': 'Amazon Relational Database Service'
+                'service': AWS_SERVICES['RDS']
             }
             
         except ClientError as e:
@@ -220,7 +220,7 @@ class CostExplorerClient:
         try:
             response = self.client.get_savings_plans_utilization(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             total_savings = 0.0
@@ -283,7 +283,7 @@ class CostExplorerClient:
                         'Values': [service_name]
                     }
                 },
-                Granularity='MONTHLY'
+                Granularity=DEFAULT_GRANULARITY
             )
             
             total_savings = 0.0
@@ -334,8 +334,8 @@ class CostExplorerClient:
             Dictionary containing RDS RI savings data
         """
         return self._get_reservation_savings(
-            'Amazon Relational Database Service', 
-            'RDS Reserved Instances'
+            AWS_SERVICES['RDS'], 
+            SERVICE_DISPLAY_NAMES['RDS']
         )
     
     def get_os_savings(self) -> Dict:
@@ -345,9 +345,97 @@ class CostExplorerClient:
             Dictionary containing OpenSearch RI savings data
         """
         return self._get_reservation_savings(
-            'Amazon OpenSearch Service', 
-            'OpenSearch Reserved Instances'
+            AWS_SERVICES['OPENSEARCH'], 
+            SERVICE_DISPLAY_NAMES['OPENSEARCH']
         )
+    
+    def get_credit_savings(self) -> Dict:
+        """Get credit savings from all AWS credits for the selected period.
+        
+        Returns:
+            Dictionary containing credit savings data
+        """
+        try:
+            response = self.client.get_cost_and_usage(
+                TimePeriod=self._get_time_period(),
+                Granularity=DEFAULT_GRANULARITY,
+                Metrics=['UNBLENDED_COST'],
+                GroupBy=[
+                    {
+                        'Type': 'DIMENSION',
+                        'Key': 'SERVICE'
+                    },
+                    {
+                        'Type': 'DIMENSION',
+                        'Key': 'USAGE_TYPE'
+                    }
+                ],
+                Filter={
+                    'Dimensions': {
+                        'Key': 'RECORD_TYPE',
+                        'Values': ['Credit']
+                    }
+                }
+            )
+            
+            total_credit_savings = 0.0
+            credit_details = []
+            
+            for result in response.get('ResultsByTime', []):
+                period_start = result.get('TimePeriod', {}).get('Start', '')
+                period_end = result.get('TimePeriod', {}).get('End', '')
+                
+                period_credit_total = 0.0
+                
+                for group in result.get('Groups', []):
+                    # Extract service and usage type from Keys
+                    keys = group.get('Keys', [])
+                    service = keys[0] if len(keys) > 0 else 'Unknown'
+                    usage_type = keys[1] if len(keys) > 1 else 'Unknown'
+                    
+                    # Get cost amounts (credits are typically negative values)
+                    unblended_cost = abs(float(group.get('Metrics', {}).get('UnblendedCost', {}).get('Amount', '0')))
+                    
+                    # Use unblended cost as primary metric
+                    credit_amount = unblended_cost
+                    period_credit_total += credit_amount
+                    
+                    if credit_amount > 0:
+                        credit_details.append({
+                            'period_start': period_start,
+                            'period_end': period_end,
+                            'service': service,
+                            'usage_type': usage_type,
+                            'credit_amount': round(credit_amount, 2),
+                            'unblended_cost': round(unblended_cost, 2)
+                        })
+                
+                total_credit_savings += period_credit_total
+            
+            return {
+                'total_savings': round(total_credit_savings, 2),
+                'detailed_credits': credit_details,
+                'period': {
+                    'start': self.start_date,
+                    'end': self.end_date
+                },
+                'charge_type': 'Credits'
+            }
+            
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'DataUnavailableException':
+                return {
+                    'total_savings': 0.0,
+                    'detailed_credits': [],
+                    'period': {'start': self.start_date, 'end': self.end_date},
+                    'charge_type': 'Credits',
+                    'error': 'No credit data available for this period'
+                }
+            else:
+                raise Exception(f"AWS API Error: {e.response['Error']['Message']}")
+        except Exception as e:
+            raise Exception(f"Failed to fetch credit savings: {str(e)}")
     
     def get_total_savings(self) -> Dict:
         """Get total savings from all AWS cost optimization services.
@@ -360,6 +448,7 @@ class CostExplorerClient:
             'savings_plans': 0.0,
             'rds_reservations': 0.0, 
             'opensearch_reservations': 0.0,
+            'credit_savings': 0.0,
             'total_savings': 0.0,
             'period': {
                 'start': self.start_date,
@@ -399,10 +488,21 @@ class CostExplorerClient:
         except Exception as e:
             savings_breakdown['errors'].append(f"OpenSearch Reservations: {str(e)}")
         
+        # 4. Get Credit savings
+        try:
+            credit_data = self.get_credit_savings()
+            savings_breakdown['credit_savings'] = credit_data['total_savings']
+            savings_breakdown['detailed_savings']['credit_savings'] = credit_data
+            if 'error' in credit_data:
+                savings_breakdown['errors'].append(f"Credit Savings: {credit_data['error']}")
+        except Exception as e:
+            savings_breakdown['errors'].append(f"Credit Savings: {str(e)}")
+        
         # Calculate total savings
         total = (savings_breakdown['savings_plans'] + 
                 savings_breakdown['rds_reservations'] +
-                savings_breakdown['opensearch_reservations'])
+                savings_breakdown['opensearch_reservations'] +
+                savings_breakdown['credit_savings'])
         
         savings_breakdown['total_savings'] = round(total, 2)
         
@@ -411,7 +511,7 @@ class CostExplorerClient:
     def get_cost_and_usage(self) -> Dict:
         """Fetch cost and usage data from AWS Cost Explorer.
         Uses class-level start_date and end_date.
-        Returns BlendedCost data with SERVICE grouping.
+        Returns cost data with SERVICE grouping using configured metrics.
         
         Returns:
             Dictionary containing cost and usage data
@@ -420,7 +520,7 @@ class CostExplorerClient:
             response = self.client.get_cost_and_usage(
                 TimePeriod=self._get_time_period(),
                 Granularity='DAILY',
-                Metrics=['BlendedCost'],
+                Metrics=COST_METRICS,
                 GroupBy=[
                     {
                         'Type': 'DIMENSION',
@@ -466,7 +566,7 @@ class CostExplorerClient:
         try:
             response = self.client.get_cost_and_usage(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY',
+                Granularity=DEFAULT_GRANULARITY,
                 Metrics=['BlendedCost']
             )
             
@@ -485,8 +585,8 @@ class CostExplorerClient:
         try:
             response = self.client.get_cost_and_usage(
                 TimePeriod=self._get_time_period(),
-                Granularity='MONTHLY',
-                Metrics=['BlendedCost'],
+                Granularity=DEFAULT_GRANULARITY,
+                Metrics=COST_METRICS,
                 GroupBy=[
                     {
                         'Type': 'DIMENSION',
