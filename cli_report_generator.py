@@ -58,37 +58,9 @@ def print_console_report(report_data, start_date, end_date):
     if total_cost > 0:
         optimization_rate = (total_savings_amount / total_cost * 100)
         click.echo(f"Cost Optimization Rate: {optimization_rate:.1f}%")
-    click.echo(f"Number of Services: {len(service_costs)}")
     
-    # 2. SAVINGS (with total and breakdown)
-    click.echo("\n💰 SAVINGS SUMMARY")
-    click.echo("-" * 40)
-    
-    if 'total_savings' in total_savings:
-        total_amount = total_savings.get('total_savings', 0)
-        click.echo(f"Total Monthly Savings: ${total_amount:.2f}")
-        
-        savings_breakdown = [
-            ("Savings Plans", total_savings.get('savings_plans', 0)),
-            ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
-            ("Credit Savings", total_savings.get('credit_savings', 0))
-        ]
-        
-        click.echo("\nSavings Breakdown:")
-        for source, amount in savings_breakdown:
-            # Always show Savings Plans and Credit Savings, show others only if amount > 0
-            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
-                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
-                click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
-        
-        if total_savings.get('errors'):
-            click.echo("\n⚠️  Savings Collection Errors:")
-            for error in total_savings.get('errors', []):
-                click.echo(f"  • {error}")
-    
-    # 3. SAVINGS PLAN COVERAGE
-    click.echo("\n📈 SAVINGS PLAN COVERAGE")
+    # 2. SAVINGS PLAN COVERAGE/UTILIZATION
+    click.echo("\n📈 SAVINGS PLAN COVERAGE/UTILIZATION")
     click.echo("-" * 40)
     
     if 'average_coverage_percentage' in sp_coverage:
@@ -142,8 +114,8 @@ def print_console_report(report_data, start_date, end_date):
         click.echo("-" * 40)
         click.echo("Trend analysis not available - insufficient data")
     
-    # 4. RDS RESERVATION COVERAGE
-    click.echo("\n🗄️  RDS RESERVED INSTANCES COVERAGE")
+    # 3. RDS RESERVED INSTANCES COVERAGE/UTILIZATION
+    click.echo("\n🗄️  RDS RESERVED INSTANCES COVERAGE/UTILIZATION")
     click.echo("-" * 40)
     
     if rds_coverage and 'average_hours_coverage_percentage' in rds_coverage:
@@ -169,15 +141,59 @@ def print_console_report(report_data, start_date, end_date):
     else:
         click.echo("No RDS Reserved Instance data available")
     
-    # 5. SELECTED MONTH TOTAL COST
-    click.echo("\n💰 SELECTED MONTH COST BREAKDOWN")
+    # 4. SAVINGS SUMMARY
+    click.echo("\n💰 SAVINGS SUMMARY")
     click.echo("-" * 40)
     
-    click.echo(f"Total Cost: ${total_cost:.2f}")
-    click.echo(f"Number of Services: {len(service_costs)}")
-    click.echo(f"Average Daily Cost: ${total_cost/30:.2f}")
+    if 'total_savings' in total_savings:
+        total_amount = total_savings.get('total_savings', 0)
+        click.echo(f"Total Monthly Savings: ${total_amount:.2f}")
+        
+        savings_breakdown = [
+            ("Savings Plans", total_savings.get('savings_plans', 0)),
+            ("RDS Reservations", total_savings.get('rds_reservations', 0)),
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
+            ("Credit Savings", total_savings.get('credit_savings', 0))
+        ]
+        
+        click.echo("\nSavings Breakdown:")
+        for source, amount in savings_breakdown:
+            # Always show Savings Plans and Credit Savings, show others only if amount > 0
+            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
+                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
+                click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
+        
+        if total_savings.get('errors'):
+            click.echo("\n⚠️  Savings Collection Errors:")
+            for error in total_savings.get('errors', []):
+                click.echo(f"  • {error}")
     
-    # 6. QUARTER TOTAL COST
+    # 5. SELECTED MONTH COST VS PREVIOUS MONTH
+    click.echo("\n💰 SELECTED MONTH COST VS PREVIOUS MONTH")
+    click.echo("-" * 40)
+    
+    if quarterly_costs:
+        selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
+        month_minus_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
+        
+        # Calculate month-over-month change
+        mom_change = 0.0
+        mom_percentage = 0.0
+        if month_minus_one_cost > 0:
+            mom_change = selected_month_cost - month_minus_one_cost
+            mom_percentage = (mom_change / month_minus_one_cost) * 100
+        
+        click.echo(f"Selected Month Cost: ${selected_month_cost:.2f}")
+        click.echo(f"Previous Month Cost:  ${month_minus_one_cost:.2f}")
+        click.echo(f"Month-over-Month Change: ${mom_change:.2f}")
+        click.echo(f"Change Percentage: {mom_percentage:+.1f}%")
+        
+        trend = "Increasing" if mom_change > 0 else "Decreasing" if mom_change < 0 else "Stable"
+        click.echo(f"Trend: {trend}")
+    else:
+        click.echo("No monthly comparison data available")
+    
+    # 6. QUARTERLY COST SUMMARY
     click.echo("\n📊 QUARTERLY COST SUMMARY (3 MONTHS)")
     click.echo("-" * 40)
     
@@ -209,7 +225,7 @@ def print_console_report(report_data, start_date, end_date):
     else:
         click.echo("No quarterly cost data available")
     
-    # 7. BUDGET ANOMALIES (at the end)
+    # 7. BUDGET ANOMALIES
     click.echo("\n🚨 BUDGET ANOMALIES ANALYSIS")
     click.echo("-" * 40)
     
@@ -277,6 +293,16 @@ def print_console_report(report_data, start_date, end_date):
                 
     else:
         click.echo("No budget data available - Budget analysis requires AWS Budgets to be configured")
+    
+    # 8. SERVICE ANOMALIES (Work in Progress)
+    click.echo("\n🔍 SERVICE ANOMALIES ANALYSIS")
+    click.echo("-" * 40)
+    click.echo("🚧 This section is currently under development.")
+    click.echo("Future functionality will include:")
+    click.echo("  • Detection of unusual service cost spikes")
+    click.echo("  • Identification of new or discontinued services")
+    click.echo("  • Analysis of service cost patterns and trends")
+    click.echo("  • Recommendations for cost optimization opportunities")
     
     click.echo("\n" + SECTION_SEPARATOR)
     click.echo("Report complete. PDF generation will follow...")

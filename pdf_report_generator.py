@@ -97,21 +97,27 @@ class PDFReportGenerator:
         # 1. Executive summary
         story.extend(self._create_executive_summary(cost_data, total_savings, quarterly_costs))
         
-        # 2. Savings summary (with total and breakdown)
-        story.extend(self._create_savings_summary(total_savings, sp_coverage))
-        
-        # 3. Savings Plan Coverage
+        # 2. Savings Plan Coverage/Utilization
         story.extend(self._create_coverage_summary(sp_coverage))
         story.extend(self._create_trend_analysis(sp_coverage_with_trend))
         
-        # 4. RDS Reservation Coverage
+        # 3. RDS Reserved Instances Coverage/Utilization
         story.extend(self._create_rds_coverage_summary(rds_coverage))
         
-        # 5. Quarter total cost
+        # 4. Savings Summary (with total and breakdown)
+        story.extend(self._create_savings_summary(total_savings, sp_coverage))
+        
+        # 5. Selected Month Cost vs Previous Month
+        story.extend(self._create_monthly_comparison(cost_data, quarterly_costs))
+        
+        # 6. Quarterly Cost Summary
         story.extend(self._create_quarterly_cost_summary(quarterly_costs))
         
-        # 7. Budget Anomalies (at the end)
+        # 7. Budget Anomalies
         story.extend(self._create_budget_anomalies_summary(budget_anomalies))
+        
+        # 8. Service Anomalies (Work in Progress)
+        story.extend(self._create_service_anomalies_summary())
         
         
         # Build the PDF
@@ -160,7 +166,6 @@ class PDFReportGenerator:
             ["Quarterly Total Cost (3 months)", f"${quarterly_total:.2f}"],
             ["Monthly Savings", f"${total_savings_amount:.2f}"],
             ["Cost Optimization Rate", f"{(total_savings_amount/total_cost*100):.1f}%" if total_cost > 0 else "N/A"],
-            ["Number of Services", str(len(cost_data.get('services', {}).get('DimensionValues', [])))],
             ["Report Period", f"{(cost_data['period']['end'] - cost_data['period']['start']).days} days" if cost_data.get('period') else "N/A"]
         ]
         
@@ -521,6 +526,69 @@ class PDFReportGenerator:
                 return f"Stable ({overall_change:+.1f}% quarterly change)"
         else:
             return "Insufficient data for trend analysis"
+    
+    def _create_monthly_comparison(self, cost_data: Dict, quarterly_costs: Dict) -> List:
+        """Create monthly cost comparison section."""
+        story = []
+        
+        story.append(Paragraph("Selected Month Cost vs Previous Month", self.custom_styles['SectionHeader']))
+        
+        if not quarterly_costs:
+            story.append(Paragraph("No monthly comparison data available.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
+        month_minus_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
+        
+        # Calculate month-over-month change
+        mom_change = 0.0
+        mom_percentage = 0.0
+        if month_minus_one_cost > 0:
+            mom_change = selected_month_cost - month_minus_one_cost
+            mom_percentage = (mom_change / month_minus_one_cost) * 100
+        
+        comparison_data = [
+            ["Metric", "Value"],
+            ["Selected Month Cost", f"${selected_month_cost:.2f}"],
+            ["Previous Month Cost", f"${month_minus_one_cost:.2f}"],
+            ["Month-over-Month Change", f"${mom_change:.2f}"],
+            ["Change Percentage", f"{mom_percentage:+.1f}%"],
+            ["Trend", "Increasing" if mom_change > 0 else "Decreasing" if mom_change < 0 else "Stable"]
+        ]
+        
+        comparison_table = Table(comparison_data, colWidths=[2.5*inch, 2*inch])
+        comparison_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_orange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+        
+        story.append(comparison_table)
+        story.append(Spacer(1, 20))
+        
+        return story
+    
+    def _create_service_anomalies_summary(self) -> List:
+        """Create service anomalies summary section (work in progress)."""
+        story = []
+        
+        story.append(Paragraph("Service Anomalies Analysis", self.custom_styles['SectionHeader']))
+        story.append(Paragraph("🚧 This section is currently under development.", self.styles['Normal']))
+        story.append(Paragraph("Future functionality will include:", self.styles['Normal']))
+        story.append(Paragraph("• Detection of unusual service cost spikes", self.styles['Normal']))
+        story.append(Paragraph("• Identification of new or discontinued services", self.styles['Normal']))
+        story.append(Paragraph("• Analysis of service cost patterns and trends", self.styles['Normal']))
+        story.append(Paragraph("• Recommendations for cost optimization opportunities", self.styles['Normal']))
+        
+        story.append(Spacer(1, 20))
+        return story
     
     def _create_budget_anomalies_summary(self, budget_anomalies: Dict) -> List:
         """Create budget anomalies summary section."""
