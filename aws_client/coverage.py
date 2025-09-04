@@ -32,9 +32,28 @@ class CoverageMixin:
             
             average_coverage = total_coverage / total_periods if total_periods > 0 else 0.0
             
+            # Get utilization data as well
+            utilization_response = self.client.get_savings_plans_utilization(
+                TimePeriod=self._get_time_period(),
+                Granularity=DEFAULT_GRANULARITY
+            )
+            
+            # Calculate average utilization percentage
+            total_utilization = 0.0
+            utilization_periods = 0
+            
+            for result in utilization_response.get('SavingsPlansUtilizationsByTime', []):
+                utilization_percentage = float(result.get('Utilization', {}).get('UtilizationPercentage', '0'))
+                total_utilization += utilization_percentage
+                utilization_periods += 1
+            
+            average_utilization = total_utilization / utilization_periods if utilization_periods > 0 else 0.0
+            
             return {
                 'average_coverage_percentage': round(average_coverage, 2),
+                'average_utilization_percentage': round(average_utilization, 2),
                 'detailed_coverage': response.get('SavingsPlansCoverages', []),
+                'detailed_utilization': utilization_response.get('SavingsPlansUtilizationsByTime', []),
                 'period': {
                     'start': self.start_date,
                     'end': self.end_date
