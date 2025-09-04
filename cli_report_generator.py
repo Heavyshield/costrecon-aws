@@ -71,13 +71,14 @@ def print_console_report(report_data, start_date, end_date):
         savings_breakdown = [
             ("Savings Plans", total_savings.get('savings_plans', 0)),
             ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0))
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
+            ("Credit Savings", total_savings.get('credit_savings', 0))
         ]
         
         click.echo("\nSavings Breakdown:")
         for source, amount in savings_breakdown:
-            # Always show Savings Plans, show others only if amount > 0
-            if amount > 0 or source == "Savings Plans":
+            # Always show Savings Plans and Credit Savings, show others only if amount > 0
+            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
                 percentage = (amount / total_amount * 100) if total_amount > 0 else 0
                 click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
         
