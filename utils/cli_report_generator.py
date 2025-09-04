@@ -52,48 +52,26 @@ def print_console_report(report_data, start_date, end_date):
     quarterly_total = quarterly_costs.get('quarterly_total_cost', 0.0) if quarterly_costs else 0.0
     total_savings_amount = total_savings.get('total_savings', 0.0)
     
-    click.echo(f"Selected Month Cost: ${total_cost:.2f}")
+    # Get month name from start_date
+    month_name = start_date.strftime('%B %Y') if start_date else "Selected Month"
+    
+    click.echo(f"{month_name} Cost: ${total_cost:.2f}")
     click.echo(f"Quarterly Total (3 months): ${quarterly_total:.2f}")
     click.echo(f"Monthly Savings: ${total_savings_amount:.2f}")
     if total_cost > 0:
         optimization_rate = (total_savings_amount / total_cost * 100)
         click.echo(f"Cost Optimization Rate: {optimization_rate:.1f}%")
-    click.echo(f"Number of Services: {len(service_costs)}")
     
-    # 2. SAVINGS (with total and breakdown)
-    click.echo("\n💰 SAVINGS SUMMARY")
-    click.echo("-" * 40)
-    
-    if 'total_savings' in total_savings:
-        total_amount = total_savings.get('total_savings', 0)
-        click.echo(f"Total Monthly Savings: ${total_amount:.2f}")
-        
-        savings_breakdown = [
-            ("Savings Plans", total_savings.get('savings_plans', 0)),
-            ("RDS Reservations", total_savings.get('rds_reservations', 0)),
-            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
-            ("Credit Savings", total_savings.get('credit_savings', 0))
-        ]
-        
-        click.echo("\nSavings Breakdown:")
-        for source, amount in savings_breakdown:
-            # Always show Savings Plans and Credit Savings, show others only if amount > 0
-            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
-                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
-                click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
-        
-        if total_savings.get('errors'):
-            click.echo("\n⚠️  Savings Collection Errors:")
-            for error in total_savings.get('errors', []):
-                click.echo(f"  • {error}")
-    
-    # 3. SAVINGS PLAN COVERAGE
-    click.echo("\n📈 SAVINGS PLAN COVERAGE")
+    # 2. SAVINGS PLAN COVERAGE/UTILIZATION
+    click.echo("\n📈 SAVINGS PLAN COVERAGE/UTILIZATION")
     click.echo("-" * 40)
     
     if 'average_coverage_percentage' in sp_coverage:
         coverage_pct = sp_coverage.get('average_coverage_percentage', 0)
-        click.echo(f"Current Month Coverage: {coverage_pct:.1f}%")
+        utilization_pct = sp_coverage.get('average_utilization_percentage', 0)
+        
+        click.echo(f"Coverage: {coverage_pct:.1f}%")
+        click.echo(f"Utilization Rate: {utilization_pct:.1f}%")
         
         if coverage_pct < 70:
             click.echo("  ⚠️  Coverage below recommended 70% threshold")
@@ -101,6 +79,13 @@ def print_console_report(report_data, start_date, end_date):
             click.echo("  ✅ Excellent coverage!")
         else:
             click.echo("  ✅ Good coverage")
+            
+        if utilization_pct < 70:
+            click.echo("  ⚠️  Low utilization - review Savings Plans sizing")
+        elif utilization_pct >= 90:
+            click.echo("  ✅ Excellent utilization of Savings Plans!")
+        else:
+            click.echo("  ✅ Good utilization of Savings Plans")
     
     # 3-Month Trend Analysis (part of Savings Plan Coverage)
     if sp_coverage_with_trend and 'trend_analysis' in sp_coverage_with_trend:
@@ -142,8 +127,8 @@ def print_console_report(report_data, start_date, end_date):
         click.echo("-" * 40)
         click.echo("Trend analysis not available - insufficient data")
     
-    # 4. RDS RESERVATION COVERAGE
-    click.echo("\n🗄️  RDS RESERVED INSTANCES COVERAGE")
+    # 3. RDS RESERVED INSTANCES COVERAGE/UTILIZATION
+    click.echo("\n🗄️  RDS RESERVED INSTANCES COVERAGE/UTILIZATION")
     click.echo("-" * 40)
     
     if rds_coverage and 'average_hours_coverage_percentage' in rds_coverage:
@@ -169,15 +154,64 @@ def print_console_report(report_data, start_date, end_date):
     else:
         click.echo("No RDS Reserved Instance data available")
     
-    # 5. SELECTED MONTH TOTAL COST
-    click.echo("\n💰 SELECTED MONTH COST BREAKDOWN")
+    # 4. SAVINGS SUMMARY
+    click.echo("\n💰 SAVINGS SUMMARY")
     click.echo("-" * 40)
     
-    click.echo(f"Total Cost: ${total_cost:.2f}")
-    click.echo(f"Number of Services: {len(service_costs)}")
-    click.echo(f"Average Daily Cost: ${total_cost/30:.2f}")
+    if 'total_savings' in total_savings:
+        total_amount = total_savings.get('total_savings', 0)
+        click.echo(f"Total Monthly Savings: ${total_amount:.2f}")
+        
+        savings_breakdown = [
+            ("Savings Plans", total_savings.get('savings_plans', 0)),
+            ("RDS Reservations", total_savings.get('rds_reservations', 0)),
+            ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
+            ("Credit Savings", total_savings.get('credit_savings', 0))
+        ]
+        
+        click.echo("\nSavings Breakdown:")
+        for source, amount in savings_breakdown:
+            # Always show Savings Plans and Credit Savings, show others only if amount > 0
+            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
+                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
+                click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
+        
+        if total_savings.get('errors'):
+            click.echo("\n⚠️  Savings Collection Errors:")
+            for error in total_savings.get('errors', []):
+                click.echo(f"  • {error}")
     
-    # 6. QUARTER TOTAL COST
+    # 5. MONTHLY COMPARISON
+    # Get month names for comparison
+    from dateutil.relativedelta import relativedelta
+    current_month = start_date.strftime('%B %Y') if start_date else "Selected Month"
+    previous_month = (start_date - relativedelta(months=1)).strftime('%B %Y') if start_date else "Previous Month"
+    
+    click.echo(f"\n💰 {current_month.upper()} COST VS {previous_month.upper()}")
+    click.echo("-" * 40)
+    
+    if quarterly_costs:
+        selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
+        month_minus_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
+        
+        # Calculate month-over-month change
+        mom_change = 0.0
+        mom_percentage = 0.0
+        if month_minus_one_cost > 0:
+            mom_change = selected_month_cost - month_minus_one_cost
+            mom_percentage = (mom_change / month_minus_one_cost) * 100
+        
+        click.echo(f"{current_month} Cost: ${selected_month_cost:.2f}")
+        click.echo(f"{previous_month} Cost: ${month_minus_one_cost:.2f}")
+        click.echo(f"Month-over-Month Change: ${mom_change:.2f}")
+        click.echo(f"Change Percentage: {mom_percentage:+.1f}%")
+        
+        trend = "Increasing" if mom_change > 0 else "Decreasing" if mom_change < 0 else "Stable"
+        click.echo(f"Trend: {trend}")
+    else:
+        click.echo("No monthly comparison data available")
+    
+    # 6. QUARTERLY COST SUMMARY
     click.echo("\n📊 QUARTERLY COST SUMMARY (3 MONTHS)")
     click.echo("-" * 40)
     
@@ -187,10 +221,15 @@ def print_console_report(report_data, start_date, end_date):
         month_two_cost = quarterly_costs.get('month_minus_two_cost', 0.0)
         quarterly_total_cost = quarterly_costs.get('quarterly_total_cost', 0.0)
         
-        click.echo(f"Selected Month: ${selected_month_cost:.2f}")
-        click.echo(f"Month -1:       ${month_one_cost:.2f}")
-        click.echo(f"Month -2:       ${month_two_cost:.2f}")
-        click.echo(f"Quarter Total:  ${quarterly_total_cost:.2f}")
+        # Get actual month names for quarterly display
+        month_0_name = start_date.strftime('%b %Y') if start_date else "Selected Month"
+        month_1_name = (start_date - relativedelta(months=1)).strftime('%b %Y') if start_date else "Month -1"
+        month_2_name = (start_date - relativedelta(months=2)).strftime('%b %Y') if start_date else "Month -2"
+        
+        click.echo(f"{month_0_name:<12}: ${selected_month_cost:.2f}")
+        click.echo(f"{month_1_name:<12}: ${month_one_cost:.2f}")
+        click.echo(f"{month_2_name:<12}: ${month_two_cost:.2f}")
+        click.echo(f"Quarter Total: ${quarterly_total_cost:.2f}")
         
         if quarterly_total_cost > 0:
             avg_monthly = quarterly_total_cost / 3
@@ -209,7 +248,7 @@ def print_console_report(report_data, start_date, end_date):
     else:
         click.echo("No quarterly cost data available")
     
-    # 7. BUDGET ANOMALIES (at the end)
+    # 7. BUDGET ANOMALIES
     click.echo("\n🚨 BUDGET ANOMALIES ANALYSIS")
     click.echo("-" * 40)
     
@@ -277,6 +316,16 @@ def print_console_report(report_data, start_date, end_date):
                 
     else:
         click.echo("No budget data available - Budget analysis requires AWS Budgets to be configured")
+    
+    # 8. SERVICE ANOMALIES (Work in Progress)
+    click.echo("\n🔍 SERVICE ANOMALIES ANALYSIS")
+    click.echo("-" * 40)
+    click.echo("🚧 This section is currently under development.")
+    click.echo("Future functionality will include:")
+    click.echo("  • Detection of unusual service cost spikes")
+    click.echo("  • Identification of new or discontinued services")
+    click.echo("  • Analysis of service cost patterns and trends")
+    click.echo("  • Recommendations for cost optimization opportunities")
     
     click.echo("\n" + SECTION_SEPARATOR)
     click.echo("Report complete. PDF generation will follow...")

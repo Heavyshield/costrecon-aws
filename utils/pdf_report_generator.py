@@ -8,6 +8,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.platypus.flowables import HRFlowable
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from typing import Dict, List
 
 
@@ -95,23 +96,29 @@ class PDFReportGenerator:
         story.extend(self._create_title_page(start_date, end_date))
         
         # 1. Executive summary
-        story.extend(self._create_executive_summary(cost_data, total_savings, quarterly_costs))
+        story.extend(self._create_executive_summary(cost_data, total_savings, quarterly_costs, start_date))
         
-        # 2. Savings summary (with total and breakdown)
-        story.extend(self._create_savings_summary(total_savings, sp_coverage))
-        
-        # 3. Savings Plan Coverage
+        # 2. Savings Plan Coverage/Utilization
         story.extend(self._create_coverage_summary(sp_coverage))
         story.extend(self._create_trend_analysis(sp_coverage_with_trend))
         
-        # 4. RDS Reservation Coverage
+        # 3. RDS Reserved Instances Coverage/Utilization
         story.extend(self._create_rds_coverage_summary(rds_coverage))
         
-        # 5. Quarter total cost
+        # 4. Savings Summary (with total and breakdown)
+        story.extend(self._create_savings_summary(total_savings, sp_coverage))
+        
+        # 5. Selected Month Cost vs Previous Month
+        story.extend(self._create_monthly_comparison(cost_data, quarterly_costs, start_date))
+        
+        # 6. Quarterly Cost Summary
         story.extend(self._create_quarterly_cost_summary(quarterly_costs))
         
-        # 7. Budget Anomalies (at the end)
+        # 7. Budget Anomalies
         story.extend(self._create_budget_anomalies_summary(budget_anomalies))
+        
+        # 8. Service Anomalies (Work in Progress)
+        story.extend(self._create_service_anomalies_summary())
         
         
         # Build the PDF
@@ -144,7 +151,7 @@ class PDFReportGenerator:
         
         return story
     
-    def _create_executive_summary(self, cost_data: Dict, total_savings: Dict, quarterly_costs: Dict) -> List:
+    def _create_executive_summary(self, cost_data: Dict, total_savings: Dict, quarterly_costs: Dict, start_date: datetime = None) -> List:
         """Create executive summary section."""
         story = []
         
@@ -155,12 +162,14 @@ class PDFReportGenerator:
         quarterly_total = quarterly_costs.get('quarterly_total_cost', 0.0) if quarterly_costs else 0.0
         total_savings_amount = total_savings.get('total_savings', 0.0)
         
+        # Get month name from start_date
+        month_name = start_date.strftime('%B %Y') if start_date else "Selected Month"
+        
         summary_data = [
-            ["Selected Month Cost", f"${total_cost:.2f}"],
+            [f"{month_name} Cost", f"${total_cost:.2f}"],
             ["Quarterly Total Cost (3 months)", f"${quarterly_total:.2f}"],
             ["Monthly Savings", f"${total_savings_amount:.2f}"],
             ["Cost Optimization Rate", f"{(total_savings_amount/total_cost*100):.1f}%" if total_cost > 0 else "N/A"],
-            ["Number of Services", str(len(cost_data.get('services', {}).get('DimensionValues', [])))],
             ["Report Period", f"{(cost_data['period']['end'] - cost_data['period']['start']).days} days" if cost_data.get('period') else "N/A"]
         ]
         
@@ -253,12 +262,13 @@ class PDFReportGenerator:
             return story
         
         coverage_pct = sp_coverage.get('average_coverage_percentage', 0)
+        utilization_pct = sp_coverage.get('average_utilization_percentage', 0)
         
         coverage_data = [
             ["Metric", "Value"],
             ["Average Coverage", f"{coverage_pct:.1f}%"],
-            ["Coverage Status", self._get_coverage_status(coverage_pct)],
-            ["Recommendation", self._get_coverage_recommendation(coverage_pct)]
+            ["Utilization Rate", f"{utilization_pct:.1f}%"],
+            ["Coverage Status", self._get_coverage_status(coverage_pct)]
         ]
         
         coverage_table = Table(coverage_data, colWidths=[2*inch, 3*inch])
@@ -290,14 +300,6 @@ class PDFReportGenerator:
         else:
             return "Poor"
     
-    def _get_coverage_recommendation(self, coverage_pct: float) -> str:
-        """Get coverage recommendation based on percentage."""
-        if coverage_pct >= 90:
-            return "Maintain current coverage levels"
-        elif coverage_pct >= 70:
-            return "Consider increasing coverage for additional savings"
-        else:
-            return "Review workload patterns and consider Savings Plans"
     
     def _create_trend_analysis(self, sp_coverage_with_trend: Dict) -> List:
         """Create savings plans trend analysis section."""
@@ -521,6 +523,73 @@ class PDFReportGenerator:
                 return f"Stable ({overall_change:+.1f}% quarterly change)"
         else:
             return "Insufficient data for trend analysis"
+    
+    def _create_monthly_comparison(self, cost_data: Dict, quarterly_costs: Dict, start_date: datetime = None) -> List:
+        """Create monthly cost comparison section."""
+        story = []
+        
+        # Get month names
+        current_month = start_date.strftime('%B %Y') if start_date else "Selected Month"
+        previous_month = (start_date - relativedelta(months=1)).strftime('%B %Y') if start_date else "Previous Month"
+        
+        story.append(Paragraph(f"{current_month} Cost vs {previous_month}", self.custom_styles['SectionHeader']))
+        
+        if not quarterly_costs:
+            story.append(Paragraph("No monthly comparison data available.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+        
+        selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
+        month_minus_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
+        
+        # Calculate month-over-month change
+        mom_change = 0.0
+        mom_percentage = 0.0
+        if month_minus_one_cost > 0:
+            mom_change = selected_month_cost - month_minus_one_cost
+            mom_percentage = (mom_change / month_minus_one_cost) * 100
+        
+        comparison_data = [
+            ["Metric", "Value"],
+            [f"{current_month} Cost", f"${selected_month_cost:.2f}"],
+            [f"{previous_month} Cost", f"${month_minus_one_cost:.2f}"],
+            ["Month-over-Month Change", f"${mom_change:.2f}"],
+            ["Change Percentage", f"{mom_percentage:+.1f}%"],
+            ["Trend", "Increasing" if mom_change > 0 else "Decreasing" if mom_change < 0 else "Stable"]
+        ]
+        
+        comparison_table = Table(comparison_data, colWidths=[2.5*inch, 2*inch])
+        comparison_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_orange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+        
+        story.append(comparison_table)
+        story.append(Spacer(1, 20))
+        
+        return story
+    
+    def _create_service_anomalies_summary(self) -> List:
+        """Create service anomalies summary section (work in progress)."""
+        story = []
+        
+        story.append(Paragraph("Service Anomalies Analysis", self.custom_styles['SectionHeader']))
+        story.append(Paragraph("🚧 This section is currently under development.", self.styles['Normal']))
+        story.append(Paragraph("Future functionality will include:", self.styles['Normal']))
+        story.append(Paragraph("• Detection of unusual service cost spikes", self.styles['Normal']))
+        story.append(Paragraph("• Identification of new or discontinued services", self.styles['Normal']))
+        story.append(Paragraph("• Analysis of service cost patterns and trends", self.styles['Normal']))
+        story.append(Paragraph("• Recommendations for cost optimization opportunities", self.styles['Normal']))
+        
+        story.append(Spacer(1, 20))
+        return story
     
     def _create_budget_anomalies_summary(self, budget_anomalies: Dict) -> List:
         """Create budget anomalies summary section."""

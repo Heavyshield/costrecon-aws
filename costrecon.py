@@ -5,8 +5,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import calendar
 from aws_client import CostExplorerClient
-from pdf_report_generator import PDFReportGenerator
-from cli_report_generator import print_console_report
+from utils import PDFReportGenerator, print_console_report
 from constants import MONTH_MAPPINGS, DEFAULT_REGION
 
 
