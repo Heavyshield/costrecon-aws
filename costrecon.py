@@ -4,6 +4,7 @@ import click
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import calendar
+import re
 from aws_client import CostExplorerClient
 from utils import PDFReportGenerator, print_console_report
 from constants import MONTH_MAPPINGS, DEFAULT_REGION
@@ -28,17 +29,29 @@ def parse_month_year(month_input: str, current_year: int = None) -> tuple:
     year = current_year
     month_str = month_input
     
-    # Extract year if present
-    for separator in ['2024', '2023', '2025', '-', ' ']:
-        if separator in month_input:
-            parts = month_input.replace('-', ' ').replace('2024', ' 2024').replace('2023', ' 2023').replace('2025', ' 2025').split()
-            if len(parts) == 2:
-                month_str = parts[0]
-                try:
-                    year = int(parts[1])
-                except ValueError:
-                    pass
-            break
+    # Extract year if present using regex to find 4-digit years
+    
+    # Look for 4-digit year pattern (19xx or 20xx or 21xx)
+    year_pattern = r'(19|20|21)\d{2}'
+    year_match = re.search(year_pattern, month_input)
+    
+    if year_match:
+        # Found a year, extract it and the month part
+        year_str = year_match.group()
+        try:
+            year = int(year_str)
+            # Remove year from month_input to get just the month
+            month_str = re.sub(year_pattern, '', month_input).strip('-').strip()
+        except ValueError:
+            pass
+    else:
+        # No year found, check for separators that might indicate month-only format
+        for separator in ['-', ' ']:
+            if separator in month_input:
+                parts = month_input.split(separator)
+                if len(parts) >= 1:
+                    month_str = parts[0].strip()
+                break
     
     # Use month mappings from constants
     month_names = MONTH_MAPPINGS.copy()
@@ -189,7 +202,8 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
               help='Output PDF filename. Default: cost_report.pdf')
 @click.option('--profile', help='AWS profile to use. Uses default profile if not specified.')
 @click.option('--region', default=DEFAULT_REGION, help=f'AWS region. Default: {DEFAULT_REGION}')
-def cli(month, output, profile, region):
+@click.option('--no-pdf', is_flag=True, help='Skip PDF generation and only show console report.')
+def cli(month, output, profile, region, no_pdf):
     """Extract AWS cost data for a specific month and generate comprehensive PDF report.
     
     Examples:
@@ -199,6 +213,7 @@ def cli(month, output, profile, region):
         costrecon --month feb-2024            # February 2024
         costrecon -m dec                      # December of current year
         costrecon                             # Current month
+        costrecon --no-pdf                    # Skip PDF generation, console only
     """
     
     # Parse month and calculate dates
@@ -349,12 +364,14 @@ def cli(month, output, profile, region):
         # Print console report
         print_console_report(report_raw_data, start_date, end_date)
 
-        # Generate PDF report
-        click.echo("Generating PDF report...")
-        pdf_generator = PDFReportGenerator()
-        pdf_generator.generate_report(report_raw_data, output, start_date, end_date)
-        
-        click.echo(f"✓ Report generated successfully: {output}")
+        # Generate PDF report (unless --no-pdf flag is used)
+        if not no_pdf:
+            click.echo("Generating PDF report...")
+            pdf_generator = PDFReportGenerator()
+            pdf_generator.generate_report(report_raw_data, output, start_date, end_date)
+            click.echo(f"✓ Report generated successfully: {output}")
+        else:
+            click.echo("✓ Console report completed (PDF generation skipped)")
         
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)

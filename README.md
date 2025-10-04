@@ -1,19 +1,20 @@
 # CostRecon
 
-AWS Cost Explorer data extraction and comprehensive reporting tool with 3-month trend analysis.
+AWS Cost Explorer data extraction and reporting tool with 3-month trend analysis.
 
 ## Overview
 
-CostRecon is a Python CLI application that connects to AWS Cost Explorer API to fetch comprehensive cost and usage data, then generates both console and PDF reports with advanced analytics. It provides deep insights into AWS spending patterns, cost optimization opportunities, and savings plan trends.
+CostRecon is a Python CLI application that connects to AWS Cost Explorer API to fetch cost and usage data, then generates console and PDF reports. It provides visibility into AWS spending patterns, savings plan coverage, and cost trends.
 
 ## Features
 
 - **Month-based Analysis**: Simple month input (jan, feb, march) with automatic date calculation
+- **Flexible Year Support**: Supports any year format (jan2026, feb-2030, etc.) with future-proof parsing
 - **3-Month Trend Analysis**: Quarterly savings plan coverage trends with directional indicators
-- **Comprehensive Cost Data**: Service breakdowns, total costs, and optimization metrics
-- **Savings Analysis**: Detailed breakdown of Savings Plans, Reserved Instances, and MAP opportunities
-- **Coverage Metrics**: Savings Plan and RDS Reserved Instance coverage analysis
-- **Dual Output**: Formatted console reports with emojis and professional PDF reports
+- **Cost Data**: Service breakdowns and total costs
+- **Savings Analysis**: Breakdown of Savings Plans and Reserved Instances usage
+- **Coverage Metrics**: Savings Plan and RDS Reserved Instance coverage reporting
+- **Dual Output Options**: Choose between console-only reports or full PDF generation
 - **Amazon Color Scheme**: Reports use official Amazon branding colors
 - **Error Handling**: Graceful handling of missing data and AWS API limitations
 
@@ -56,9 +57,10 @@ python3 costrecon.py --month jan
 # Full month names work too
 python3 costrecon.py --month january
 
-# Specify year explicitly
+# Specify year explicitly (supports any year)
 python3 costrecon.py --month jan2024
-python3 costrecon.py --month february-2024
+python3 costrecon.py --month february-2026
+python3 costrecon.py --month march-2030
 
 # Previous months
 python3 costrecon.py -m dec
@@ -72,6 +74,9 @@ python3 costrecon.py --month feb --output february_costs.pdf
 # Use specific AWS profile and region
 python3 costrecon.py --month jan --profile myprofile --region us-west-2
 
+# Skip PDF generation (console report only)
+python3 costrecon.py --month jan --no-pdf
+
 # Get help
 python3 costrecon.py --help
 ```
@@ -83,7 +88,7 @@ python3 costrecon.py --help
 - 💰 Savings analysis (Savings Plans, Reserved Instances, MAP)
 - 📈 3-month savings plan trend with directional arrows (↗️↘️➡️)
 - 🗄️ RDS Reserved Instance coverage analysis
-- 📊 Optimization metrics and recommendations
+- 📊 Cost and usage metrics
 
 **PDF Report Includes:**
 - Executive summary with key metrics
@@ -92,6 +97,10 @@ python3 costrecon.py --help
 - RDS coverage analysis
 - Service breakdown details
 - Professional Amazon-branded color scheme
+
+**Output Options:**
+- Default: Console report + PDF generation
+- `--no-pdf`: Console report only (faster, no file output)
 
 ## AWS Permissions Required
 
