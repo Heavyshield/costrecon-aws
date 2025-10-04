@@ -4,6 +4,7 @@ import click
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import calendar
+import re
 from aws_client import CostExplorerClient
 from utils import PDFReportGenerator, print_console_report
 from constants import MONTH_MAPPINGS, DEFAULT_REGION
@@ -28,17 +29,29 @@ def parse_month_year(month_input: str, current_year: int = None) -> tuple:
     year = current_year
     month_str = month_input
     
-    # Extract year if present
-    for separator in ['2024', '2023', '2025', '-', ' ']:
-        if separator in month_input:
-            parts = month_input.replace('-', ' ').replace('2024', ' 2024').replace('2023', ' 2023').replace('2025', ' 2025').split()
-            if len(parts) == 2:
-                month_str = parts[0]
-                try:
-                    year = int(parts[1])
-                except ValueError:
-                    pass
-            break
+    # Extract year if present using regex to find 4-digit years
+    
+    # Look for 4-digit year pattern (19xx or 20xx or 21xx)
+    year_pattern = r'(19|20|21)\d{2}'
+    year_match = re.search(year_pattern, month_input)
+    
+    if year_match:
+        # Found a year, extract it and the month part
+        year_str = year_match.group()
+        try:
+            year = int(year_str)
+            # Remove year from month_input to get just the month
+            month_str = re.sub(year_pattern, '', month_input).strip('-').strip()
+        except ValueError:
+            pass
+    else:
+        # No year found, check for separators that might indicate month-only format
+        for separator in ['-', ' ']:
+            if separator in month_input:
+                parts = month_input.split(separator)
+                if len(parts) >= 1:
+                    month_str = parts[0].strip()
+                break
     
     # Use month mappings from constants
     month_names = MONTH_MAPPINGS.copy()
