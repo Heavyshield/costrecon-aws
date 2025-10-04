@@ -189,7 +189,8 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
               help='Output PDF filename. Default: cost_report.pdf')
 @click.option('--profile', help='AWS profile to use. Uses default profile if not specified.')
 @click.option('--region', default=DEFAULT_REGION, help=f'AWS region. Default: {DEFAULT_REGION}')
-def cli(month, output, profile, region):
+@click.option('--no-pdf', is_flag=True, help='Skip PDF generation and only show console report.')
+def cli(month, output, profile, region, no_pdf):
     """Extract AWS cost data for a specific month and generate comprehensive PDF report.
     
     Examples:
@@ -199,6 +200,7 @@ def cli(month, output, profile, region):
         costrecon --month feb-2024            # February 2024
         costrecon -m dec                      # December of current year
         costrecon                             # Current month
+        costrecon --no-pdf                    # Skip PDF generation, console only
     """
     
     # Parse month and calculate dates
@@ -349,12 +351,14 @@ def cli(month, output, profile, region):
         # Print console report
         print_console_report(report_raw_data, start_date, end_date)
 
-        # Generate PDF report
-        click.echo("Generating PDF report...")
-        pdf_generator = PDFReportGenerator()
-        pdf_generator.generate_report(report_raw_data, output, start_date, end_date)
-        
-        click.echo(f"✓ Report generated successfully: {output}")
+        # Generate PDF report (unless --no-pdf flag is used)
+        if not no_pdf:
+            click.echo("Generating PDF report...")
+            pdf_generator = PDFReportGenerator()
+            pdf_generator.generate_report(report_raw_data, output, start_date, end_date)
+            click.echo(f"✓ Report generated successfully: {output}")
+        else:
+            click.echo("✓ Console report completed (PDF generation skipped)")
         
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
