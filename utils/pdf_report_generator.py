@@ -83,12 +83,13 @@ class PDFReportGenerator:
         cost_data = report_data[0] if len(report_data) > 0 else {}
         total_savings = report_data[1] if len(report_data) > 1 else {}
         sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
-        rds_coverage = report_data[3] if len(report_data) > 3 else {}
+        rds_coverage_with_trend = report_data[3] if len(report_data) > 3 else {}
         quarterly_costs = report_data[4] if len(report_data) > 4 else {}
         budget_anomalies = report_data[5] if len(report_data) > 5 else {}
-        
+
         # Extract current month coverage for backward compatibility
         sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
+        rds_coverage = rds_coverage_with_trend.get('selected_month', {}) if rds_coverage_with_trend else {}
         
         story = []
         
@@ -101,9 +102,10 @@ class PDFReportGenerator:
         # 2. Savings Plan Coverage/Utilization
         story.extend(self._create_coverage_summary(sp_coverage))
         story.extend(self._create_trend_analysis(sp_coverage_with_trend))
-        
+
         # 3. RDS Reserved Instances Coverage/Utilization
         story.extend(self._create_rds_coverage_summary(rds_coverage))
+        story.extend(self._create_rds_trend_analysis(rds_coverage_with_trend))
         
         # 4. Savings Summary (with total and breakdown)
         story.extend(self._create_savings_summary(total_savings, sp_coverage))
@@ -440,7 +442,85 @@ class PDFReportGenerator:
             return "Fair"
         else:
             return "Poor"
-    
+
+    def _create_rds_trend_analysis(self, rds_coverage_with_trend: Dict) -> List:
+        """Create RDS Reserved Instance trend analysis section."""
+        story = []
+
+        story.append(Paragraph("3-Month RDS Reserved Instance Trend Analysis", self.custom_styles['SectionHeader']))
+
+        if not rds_coverage_with_trend or 'trend_analysis' not in rds_coverage_with_trend:
+            story.append(Paragraph("Trend analysis not available - insufficient data.", self.styles['Normal']))
+            story.append(Spacer(1, 20))
+            return story
+
+        trend_data = rds_coverage_with_trend['trend_analysis']
+        coverage_values = trend_data.get('coverage_values', [])
+        coverage_labels = trend_data.get('coverage_labels', [])
+
+        # Monthly progression table
+        if len(coverage_values) == 3:
+            progression_data = [["Month", "Coverage %", "Change from Previous"]]
+
+            for i, (label, value) in enumerate(zip(coverage_labels, coverage_values)):
+                change_text = "N/A"
+                if i > 0 and coverage_values[i-1] > 0 and value > 0:
+                    change = value - coverage_values[i-1]
+                    change_text = f"{change:+.1f}%"
+
+                progression_data.append([label, f"{value:.1f}%", change_text])
+
+            progression_table = Table(progression_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
+            progression_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.amazon_orange),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+                ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+            ]))
+
+            story.append(progression_table)
+            story.append(Spacer(1, 15))
+
+        # Trend summary table
+        quarterly_change = trend_data.get('quarterly_change', 0)
+        trend_direction = trend_data.get('trend_direction', 'unknown').title()
+        trend_strength = trend_data.get('trend_strength', 'unknown').title()
+
+        summary_data = [
+            ["Metric", "Value"],
+            ["Quarterly Change", f"{quarterly_change:+.1f}%"],
+            ["Trend Direction", trend_direction],
+            ["Trend Strength", trend_strength]
+        ]
+
+        summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.amazon_dark_blue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.amazon_gray),
+            ('GRID', (0, 0), (-1, -1), 1, self.amazon_dark_gray)
+        ]))
+
+        story.append(summary_table)
+        story.append(Spacer(1, 15))
+
+        # Trend summary message
+        summary_message = trend_data.get('summary', '')
+        if summary_message:
+            story.append(Paragraph("Trend Summary:", self.custom_styles['SubHeader']))
+            story.append(Paragraph(summary_message, self.styles['Normal']))
+
+        story.append(Spacer(1, 20))
+        return story
+
     def _calculate_total_cost(self, cost_data: Dict) -> float:
         """Calculate total cost from cost data."""
         total = 0.0
