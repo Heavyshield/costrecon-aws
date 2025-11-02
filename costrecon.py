@@ -3,7 +3,6 @@
 import click
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import calendar
 import re
 from aws_client import CostExplorerClient
 from utils import PDFReportGenerator, print_console_report
@@ -63,12 +62,15 @@ def parse_month_year(month_input: str, current_year: int = None) -> tuple:
         raise click.BadParameter(f"Invalid month '{month_str}'. Available: {available_months}")
     
     month_num = month_names[month_str]
-    
-    # Get first and last day of the month
+
+    # Get first day of the selected month
     start_date = datetime(year, month_num, 1)
-    last_day = calendar.monthrange(year, month_num)[1]
-    end_date = datetime(year, month_num, last_day)
-    
+
+    # AWS Cost Explorer API uses exclusive end dates.
+    # To include the entire month, set end_date to the first day of the next month.
+    # relativedelta handles all edge cases (month boundaries, leap years, etc.)
+    end_date = start_date + relativedelta(months=1)
+
     return start_date, end_date
 
 
@@ -110,22 +112,22 @@ def calculate_quarterly_costs(selected_month_cost_data, month_one_cost_data, mon
 
 def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selected_month_coverage):
     """Calculate quarterly trend for savings plan coverage.
-    
+
     Args:
         month_two_coverage: Coverage data for month -2 (oldest)
         month_one_coverage: Coverage data for month -1 (middle)
         selected_month_coverage: Coverage data for selected month (newest)
-    
+
     Returns:
         Dictionary containing trend analysis
     """
     # Extract coverage percentages
     coverage_values = []
     coverage_labels = []
-    
+
     for month_data, label in [
         (month_two_coverage, "Month -2"),
-        (month_one_coverage, "Month -1"), 
+        (month_one_coverage, "Month -1"),
         (selected_month_coverage, "Selected Month")
     ]:
         if month_data and 'average_coverage_percentage' in month_data:
@@ -134,7 +136,7 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
         else:
             coverage_values.append(0.0)
             coverage_labels.append(f"{label} (No Data)")
-    
+
     # Calculate trend
     trend_analysis = {
         'coverage_values': coverage_values,
@@ -144,7 +146,7 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
         'quarterly_change': 0.0,
         'month_to_month_changes': []
     }
-    
+
     # Calculate month-to-month changes
     for i in range(1, len(coverage_values)):
         if coverage_values[i-1] > 0 and coverage_values[i] > 0:
@@ -154,15 +156,15 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
                 'to_month': coverage_labels[i],
                 'change': round(change, 2)
             })
-    
+
     # Calculate overall quarterly change (oldest to newest)
     if coverage_values[0] > 0 and coverage_values[2] > 0:
         quarterly_change = coverage_values[2] - coverage_values[0]
         trend_analysis['quarterly_change'] = round(quarterly_change, 2)
-        
+
         # Determine trend direction and strength
         abs_change = abs(quarterly_change)
-        
+
         if abs_change < 2.0:
             trend_analysis['trend_direction'] = 'stable'
             trend_analysis['trend_strength'] = 'minimal'
@@ -182,7 +184,7 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
                 trend_analysis['trend_strength'] = 'moderate'
             else:
                 trend_analysis['trend_strength'] = 'weak'
-    
+
     # Add summary message
     if trend_analysis['trend_direction'] == 'stable':
         trend_analysis['summary'] = f"Savings Plan coverage has remained stable over the quarter with minimal change ({trend_analysis['quarterly_change']:.1f}%)"
@@ -190,7 +192,93 @@ def calculate_savings_plan_trend(month_two_coverage, month_one_coverage, selecte
         trend_analysis['summary'] = f"Savings Plan coverage is trending upward with a {trend_analysis['trend_strength']} increase of {trend_analysis['quarterly_change']:.1f}% over the quarter"
     else:
         trend_analysis['summary'] = f"Savings Plan coverage is trending downward with a {trend_analysis['trend_strength']} decrease of {abs(trend_analysis['quarterly_change']):.1f}% over the quarter"
-    
+
+    return trend_analysis
+
+
+def calculate_rds_coverage_trend(month_two_coverage, month_one_coverage, selected_month_coverage):
+    """Calculate quarterly trend for RDS Reserved Instance coverage.
+
+    Args:
+        month_two_coverage: RDS coverage data for month -2 (oldest)
+        month_one_coverage: RDS coverage data for month -1 (middle)
+        selected_month_coverage: RDS coverage data for selected month (newest)
+
+    Returns:
+        Dictionary containing trend analysis
+    """
+    # Extract coverage percentages (using hours coverage for RDS)
+    coverage_values = []
+    coverage_labels = []
+
+    for month_data, label in [
+        (month_two_coverage, "Month -2"),
+        (month_one_coverage, "Month -1"),
+        (selected_month_coverage, "Selected Month")
+    ]:
+        if month_data and 'average_hours_coverage_percentage' in month_data:
+            coverage_values.append(month_data['average_hours_coverage_percentage'])
+            coverage_labels.append(label)
+        else:
+            coverage_values.append(0.0)
+            coverage_labels.append(f"{label} (No Data)")
+
+    # Calculate trend
+    trend_analysis = {
+        'coverage_values': coverage_values,
+        'coverage_labels': coverage_labels,
+        'trend_direction': 'stable',
+        'trend_strength': 'none',
+        'quarterly_change': 0.0,
+        'month_to_month_changes': []
+    }
+
+    # Calculate month-to-month changes
+    for i in range(1, len(coverage_values)):
+        if coverage_values[i-1] > 0 and coverage_values[i] > 0:
+            change = coverage_values[i] - coverage_values[i-1]
+            trend_analysis['month_to_month_changes'].append({
+                'from_month': coverage_labels[i-1],
+                'to_month': coverage_labels[i],
+                'change': round(change, 2)
+            })
+
+    # Calculate overall quarterly change (oldest to newest)
+    if coverage_values[0] > 0 and coverage_values[2] > 0:
+        quarterly_change = coverage_values[2] - coverage_values[0]
+        trend_analysis['quarterly_change'] = round(quarterly_change, 2)
+
+        # Determine trend direction and strength
+        abs_change = abs(quarterly_change)
+
+        if abs_change < 2.0:
+            trend_analysis['trend_direction'] = 'stable'
+            trend_analysis['trend_strength'] = 'minimal'
+        elif quarterly_change > 0:
+            trend_analysis['trend_direction'] = 'increasing'
+            if abs_change > 10.0:
+                trend_analysis['trend_strength'] = 'strong'
+            elif abs_change > 5.0:
+                trend_analysis['trend_strength'] = 'moderate'
+            else:
+                trend_analysis['trend_strength'] = 'weak'
+        else:
+            trend_analysis['trend_direction'] = 'decreasing'
+            if abs_change > 10.0:
+                trend_analysis['trend_strength'] = 'strong'
+            elif abs_change > 5.0:
+                trend_analysis['trend_strength'] = 'moderate'
+            else:
+                trend_analysis['trend_strength'] = 'weak'
+
+    # Add summary message
+    if trend_analysis['trend_direction'] == 'stable':
+        trend_analysis['summary'] = f"RDS Reserved Instance coverage has remained stable over the quarter with minimal change ({trend_analysis['quarterly_change']:.1f}%)"
+    elif trend_analysis['trend_direction'] == 'increasing':
+        trend_analysis['summary'] = f"RDS Reserved Instance coverage is trending upward with a {trend_analysis['trend_strength']} increase of {trend_analysis['quarterly_change']:.1f}% over the quarter"
+    else:
+        trend_analysis['summary'] = f"RDS Reserved Instance coverage is trending downward with a {trend_analysis['trend_strength']} decrease of {abs(trend_analysis['quarterly_change']):.1f}% over the quarter"
+
     return trend_analysis
 
 
@@ -334,14 +422,46 @@ def cli(month, output, profile, region, no_pdf):
         }
         report_raw_data.append(sp_coverage_with_trend)
 
-        # Fetch RDS coverage data for selected month
-        click.echo("Fetching RDS Reserved Instance coverage...")
+        # Fetch RDS coverage data for 3-month trend analysis
+        click.echo("Fetching RDS Reserved Instance coverage for 3-month trend analysis...")
+
+        click.echo("  - Fetching RDS coverage for selected month...")
         try:
-            rds_coverage = cost_client_selected_month.get_RDS_coverage()
+            rds_coverage_selected = cost_client_selected_month.get_RDS_coverage()
         except Exception as e:
-            click.echo(f"  Warning: {str(e)}")
-            rds_coverage = {}
-        report_raw_data.append(rds_coverage)
+            click.echo(f"    Warning: {str(e)}")
+            rds_coverage_selected = {}
+
+        click.echo("  - Fetching RDS coverage for month -1...")
+        try:
+            rds_coverage_month_one = cost_client_month_one.get_RDS_coverage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            rds_coverage_month_one = {}
+
+        click.echo("  - Fetching RDS coverage for month -2...")
+        try:
+            rds_coverage_month_two = cost_client_month_two.get_RDS_coverage()
+        except Exception as e:
+            click.echo(f"    Warning: {str(e)}")
+            rds_coverage_month_two = {}
+
+        # Calculate quarterly RDS trend
+        click.echo("Calculating quarterly RDS Reserved Instance trend...")
+        rds_trend_analysis = calculate_rds_coverage_trend(
+            rds_coverage_month_two,
+            rds_coverage_month_one,
+            rds_coverage_selected
+        )
+
+        # Add RDS coverage data and trend analysis to report
+        rds_coverage_with_trend = {
+            'selected_month': rds_coverage_selected,
+            'month_minus_one': rds_coverage_month_one,
+            'month_minus_two': rds_coverage_month_two,
+            'trend_analysis': rds_trend_analysis
+        }
+        report_raw_data.append(rds_coverage_with_trend)
         
         # Add quarterly costs to report data
         report_raw_data.append(quarterly_costs)

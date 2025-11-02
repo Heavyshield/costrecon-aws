@@ -39,6 +39,9 @@ cost_report_*.pdf
 # Logs
 *.log
 
+# Changelog
+CHANGELOG.txt
+
 # Testing
 .coverage
 .pytest_cache/
