@@ -2,6 +2,15 @@
 
 import click
 from constants import REPORT_WIDTH, SECTION_SEPARATOR
+from utils.report_helpers import (
+    ReportDataParser,
+    CostCalculations,
+    StatusDetermination,
+    TrendAnalysis,
+    BudgetHelpers,
+    DateFormatting,
+    SavingsHelpers
+)
 
 
 def print_console_report(report_data, start_date, end_date):
@@ -19,47 +28,38 @@ def print_console_report(report_data, start_date, end_date):
     click.echo(f"Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
     click.echo(SECTION_SEPARATOR)
     
-    # Parse report data (expecting list with cost_data, total_savings, sp_coverage_with_trend, rds_coverage, quarterly_costs, budget_anomalies)
-    cost_data = report_data[0] if len(report_data) > 0 else {}
-    total_savings = report_data[1] if len(report_data) > 1 else {}
-    sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
-    rds_coverage = report_data[3] if len(report_data) > 3 else {}
-    quarterly_costs = report_data[4] if len(report_data) > 4 else {}
-    budget_anomalies = report_data[5] if len(report_data) > 5 else {}
-    
-    # Extract current month coverage for backward compatibility
-    sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
+    # Parse report data
+    parsed_data = ReportDataParser.parse_report_data(report_data)
+    cost_data = parsed_data['cost_data']
+    total_savings = parsed_data['total_savings']
+    sp_coverage_with_trend = parsed_data['sp_coverage_with_trend']
+    rds_coverage_with_trend = parsed_data['rds_coverage_with_trend']
+    quarterly_costs = parsed_data['quarterly_costs']
+    budget_anomalies = parsed_data['budget_anomalies']
+
+    # Extract current month coverage
+    sp_coverage, rds_coverage = ReportDataParser.extract_current_month_coverage(
+        sp_coverage_with_trend, rds_coverage_with_trend
+    )
     
     # 1. EXECUTIVE SUMMARY
     click.echo("\n🎯 EXECUTIVE SUMMARY")
     click.echo("-" * 40)
     
-    total_cost = 0.0
-    service_costs = {}
-    
-    if 'cost_data' in cost_data:
-        for result in cost_data['cost_data'].get('ResultsByTime', []):
-            for group in result.get('Groups', []):
-                service_name = group.get('Keys', ['Unknown'])[0]
-                amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
-                total_cost += amount
-                
-                if service_name in service_costs:
-                    service_costs[service_name] += amount
-                else:
-                    service_costs[service_name] = amount
-    
+    # Calculate costs using shared utilities
+    total_cost = CostCalculations.calculate_total_cost(cost_data)
     quarterly_total = quarterly_costs.get('quarterly_total_cost', 0.0) if quarterly_costs else 0.0
     total_savings_amount = total_savings.get('total_savings', 0.0)
-    
-    # Get month name from start_date
-    month_name = start_date.strftime('%B %Y') if start_date else "Selected Month"
-    
+
+    # Get month name
+    month_name = DateFormatting.get_month_name(start_date, 'full')
+
     click.echo(f"{month_name} Cost: ${total_cost:.2f}")
     click.echo(f"Quarterly Total (3 months): ${quarterly_total:.2f}")
     click.echo(f"Monthly Savings: ${total_savings_amount:.2f}")
+
+    optimization_rate = CostCalculations.calculate_optimization_rate(total_savings_amount, total_cost)
     if total_cost > 0:
-        optimization_rate = (total_savings_amount / total_cost * 100)
         click.echo(f"Cost Optimization Rate: {optimization_rate:.1f}%")
     
     # 2. SAVINGS PLAN COVERAGE/UTILIZATION
@@ -69,23 +69,23 @@ def print_console_report(report_data, start_date, end_date):
     if 'average_coverage_percentage' in sp_coverage:
         coverage_pct = sp_coverage.get('average_coverage_percentage', 0)
         utilization_pct = sp_coverage.get('average_utilization_percentage', 0)
-        
+
         click.echo(f"Coverage: {coverage_pct:.1f}%")
         click.echo(f"Utilization Rate: {utilization_pct:.1f}%")
-        
+
+        # Get coverage status and recommendation
+        coverage_status = StatusDetermination.get_coverage_status(coverage_pct)
         if coverage_pct < 70:
             click.echo("  ⚠️  Coverage below recommended 70% threshold")
-        elif coverage_pct >= 90:
-            click.echo("  ✅ Excellent coverage!")
         else:
-            click.echo("  ✅ Good coverage")
-            
+            click.echo(f"  ✅ {coverage_status} coverage!")
+
+        # Get utilization recommendation
+        util_recommendation = StatusDetermination.get_utilization_recommendation(utilization_pct, "Savings Plans")
         if utilization_pct < 70:
-            click.echo("  ⚠️  Low utilization - review Savings Plans sizing")
-        elif utilization_pct >= 90:
-            click.echo("  ✅ Excellent utilization of Savings Plans!")
+            click.echo(f"  ⚠️  {util_recommendation}")
         else:
-            click.echo("  ✅ Good utilization of Savings Plans")
+            click.echo(f"  ✅ {util_recommendation}")
     
     # 3-Month Trend Analysis (part of Savings Plan Coverage)
     if sp_coverage_with_trend and 'trend_analysis' in sp_coverage_with_trend:
@@ -134,23 +134,23 @@ def print_console_report(report_data, start_date, end_date):
     if rds_coverage and 'average_hours_coverage_percentage' in rds_coverage:
         hours_coverage = rds_coverage.get('average_hours_coverage_percentage', 0)
         utilization = rds_coverage.get('average_utilization_percentage', 0)
-        
+
         click.echo(f"Hours Coverage: {hours_coverage:.1f}%")
         click.echo(f"Utilization Rate: {utilization:.1f}%")
-        
+
+        # Get coverage recommendation
+        coverage_rec = StatusDetermination.get_coverage_recommendation(hours_coverage, "RDS Reserved Instance")
         if hours_coverage < 50:
-            click.echo("  ⚠️  Low RDS Reserved Instance coverage - consider purchasing RIs")
-        elif hours_coverage >= 80:
-            click.echo("  ✅ Excellent RDS Reserved Instance coverage!")
+            click.echo(f"  ⚠️  {coverage_rec}")
         else:
-            click.echo("  ✅ Good RDS Reserved Instance coverage")
-        
+            click.echo(f"  ✅ {coverage_rec}")
+
+        # Get utilization recommendation
+        util_rec = StatusDetermination.get_utilization_recommendation(utilization, "Reserved Instances")
         if utilization < 70:
-            click.echo("  ⚠️  Low utilization - review instance sizing")
-        elif utilization >= 90:
-            click.echo("  ✅ Excellent utilization of Reserved Instances!")
+            click.echo(f"  ⚠️  {util_rec}")
         else:
-            click.echo("  ✅ Good utilization of Reserved Instances")
+            click.echo(f"  ✅ {util_rec}")
     else:
         click.echo("No RDS Reserved Instance data available")
     
@@ -168,12 +168,12 @@ def print_console_report(report_data, start_date, end_date):
             ("OpenSearch Reservations", total_savings.get('opensearch_reservations', 0)),
             ("Credit Savings", total_savings.get('credit_savings', 0))
         ]
-        
+
         click.echo("\nSavings Breakdown:")
         for source, amount in savings_breakdown:
-            # Always show Savings Plans and Credit Savings, show others only if amount > 0
-            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
-                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
+            # Use shared helper to determine if item should be displayed
+            if SavingsHelpers.should_display_savings_item(source, amount):
+                percentage = SavingsHelpers.calculate_savings_percentage(amount, total_amount)
                 click.echo(f"  • {source:<25} ${amount:>8.2f} ({percentage:>5.1f}%)")
         
         if total_savings.get('errors'):
@@ -183,30 +183,27 @@ def print_console_report(report_data, start_date, end_date):
     
     # 5. MONTHLY COMPARISON
     # Get month names for comparison
-    from dateutil.relativedelta import relativedelta
-    current_month = start_date.strftime('%B %Y') if start_date else "Selected Month"
-    previous_month = (start_date - relativedelta(months=1)).strftime('%B %Y') if start_date else "Previous Month"
-    
+    current_month = DateFormatting.get_month_name(start_date, 'full')
+    previous_month = DateFormatting.get_previous_month_name(start_date, 'full')
+
     click.echo(f"\n💰 {current_month.upper()} COST VS {previous_month.upper()}")
     click.echo("-" * 40)
-    
+
     if quarterly_costs:
         selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
         month_minus_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
-        
-        # Calculate month-over-month change
-        mom_change = 0.0
-        mom_percentage = 0.0
-        if month_minus_one_cost > 0:
-            mom_change = selected_month_cost - month_minus_one_cost
-            mom_percentage = (mom_change / month_minus_one_cost) * 100
-        
+
+        # Calculate month-over-month change using shared utility
+        mom_change, mom_percentage = CostCalculations.calculate_mom_change(
+            selected_month_cost, month_minus_one_cost
+        )
+
         click.echo(f"{current_month} Cost: ${selected_month_cost:.2f}")
         click.echo(f"{previous_month} Cost: ${month_minus_one_cost:.2f}")
         click.echo(f"Month-over-Month Change: ${mom_change:.2f}")
         click.echo(f"Change Percentage: {mom_percentage:+.1f}%")
-        
-        trend = "Increasing" if mom_change > 0 else "Decreasing" if mom_change < 0 else "Stable"
+
+        trend = TrendAnalysis.get_trend_direction_simple(selected_month_cost, month_minus_one_cost)
         click.echo(f"Trend: {trend}")
     else:
         click.echo("No monthly comparison data available")
@@ -214,37 +211,28 @@ def print_console_report(report_data, start_date, end_date):
     # 6. QUARTERLY COST SUMMARY
     click.echo("\n📊 QUARTERLY COST SUMMARY (3 MONTHS)")
     click.echo("-" * 40)
-    
+
     if quarterly_costs:
         selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
-        month_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0) 
+        month_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
         month_two_cost = quarterly_costs.get('month_minus_two_cost', 0.0)
         quarterly_total_cost = quarterly_costs.get('quarterly_total_cost', 0.0)
-        
+
         # Get actual month names for quarterly display
-        month_0_name = start_date.strftime('%b %Y') if start_date else "Selected Month"
-        month_1_name = (start_date - relativedelta(months=1)).strftime('%b %Y') if start_date else "Month -1"
-        month_2_name = (start_date - relativedelta(months=2)).strftime('%b %Y') if start_date else "Month -2"
-        
+        month_0_name, month_1_name, month_2_name = DateFormatting.get_month_names_for_quarter(start_date)
+
         click.echo(f"{month_0_name:<12}: ${selected_month_cost:.2f}")
         click.echo(f"{month_1_name:<12}: ${month_one_cost:.2f}")
         click.echo(f"{month_2_name:<12}: ${month_two_cost:.2f}")
         click.echo(f"Quarter Total: ${quarterly_total_cost:.2f}")
-        
+
         if quarterly_total_cost > 0:
-            avg_monthly = quarterly_total_cost / 3
+            avg_monthly = CostCalculations.calculate_quarterly_average(quarterly_total_cost)
             click.echo(f"Average Monthly: ${avg_monthly:.2f}")
-            
-            # Cost trend analysis
-            if selected_month_cost > 0 and month_one_cost > 0 and month_two_cost > 0:
-                overall_change = ((selected_month_cost - month_two_cost) / month_two_cost) * 100
-                if overall_change > 5:
-                    trend = f"Increasing ({overall_change:+.1f}% growth)"
-                elif overall_change < -5:
-                    trend = f"Decreasing ({overall_change:+.1f}% decline)"
-                else:
-                    trend = f"Stable ({overall_change:+.1f}% change)"
-                click.echo(f"Quarterly Trend: {trend}")
+
+            # Cost trend analysis using shared utility
+            trend = TrendAnalysis.get_cost_trend(month_two_cost, month_one_cost, selected_month_cost)
+            click.echo(f"Quarterly Trend: {trend}")
     else:
         click.echo("No quarterly cost data available")
     
@@ -274,15 +262,10 @@ def print_console_report(report_data, start_date, end_date):
                 above_target_pct = budget.get('actual_above_target_percentage', 0)
                 severity = budget.get('severity', 'LOW')
                 currency = budget.get('currency', 'USD')
-                
-                # Severity emoji
-                severity_emoji = {
-                    'CRITICAL': '🔴',
-                    'HIGH': '🟠', 
-                    'MEDIUM': '🟡',
-                    'LOW': '🟢'
-                }.get(severity, '⚪')
-                
+
+                # Get severity emoji using shared helper
+                severity_emoji = BudgetHelpers.get_severity_emoji(severity)
+
                 click.echo(f"\n  • {budget_name}")
                 click.echo(f"    Budget Limit:     {currency} {budget_limit:,.2f}")
                 click.echo(f"    Actual Amount:    {currency} {actual_amount:,.2f}")

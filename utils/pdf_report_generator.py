@@ -8,8 +8,16 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.platypus.flowables import HRFlowable
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from typing import Dict, List
+from utils.report_helpers import (
+    ReportDataParser,
+    CostCalculations,
+    StatusDetermination,
+    TrendAnalysis,
+    BudgetHelpers,
+    DateFormatting,
+    SavingsHelpers
+)
 
 
 class PDFReportGenerator:
@@ -79,17 +87,19 @@ class PDFReportGenerator:
             bottomMargin=18
         )
         
-        # Extract data components
-        cost_data = report_data[0] if len(report_data) > 0 else {}
-        total_savings = report_data[1] if len(report_data) > 1 else {}
-        sp_coverage_with_trend = report_data[2] if len(report_data) > 2 else {}
-        rds_coverage_with_trend = report_data[3] if len(report_data) > 3 else {}
-        quarterly_costs = report_data[4] if len(report_data) > 4 else {}
-        budget_anomalies = report_data[5] if len(report_data) > 5 else {}
+        # Parse report data using shared utility
+        parsed_data = ReportDataParser.parse_report_data(report_data)
+        cost_data = parsed_data['cost_data']
+        total_savings = parsed_data['total_savings']
+        sp_coverage_with_trend = parsed_data['sp_coverage_with_trend']
+        rds_coverage_with_trend = parsed_data['rds_coverage_with_trend']
+        quarterly_costs = parsed_data['quarterly_costs']
+        budget_anomalies = parsed_data['budget_anomalies']
 
-        # Extract current month coverage for backward compatibility
-        sp_coverage = sp_coverage_with_trend.get('selected_month', {}) if sp_coverage_with_trend else {}
-        rds_coverage = rds_coverage_with_trend.get('selected_month', {}) if rds_coverage_with_trend else {}
+        # Extract current month coverage
+        sp_coverage, rds_coverage = ReportDataParser.extract_current_month_coverage(
+            sp_coverage_with_trend, rds_coverage_with_trend
+        )
         
         story = []
         
@@ -158,20 +168,23 @@ class PDFReportGenerator:
         story = []
         
         story.append(Paragraph("Executive Summary", self.custom_styles['SectionHeader']))
-        
-        # Calculate total costs
-        total_cost = self._calculate_total_cost(cost_data)
+
+        # Calculate total costs using shared utility
+        total_cost = CostCalculations.calculate_total_cost(cost_data)
         quarterly_total = quarterly_costs.get('quarterly_total_cost', 0.0) if quarterly_costs else 0.0
         total_savings_amount = total_savings.get('total_savings', 0.0)
-        
-        # Get month name from start_date
-        month_name = start_date.strftime('%B %Y') if start_date else "Selected Month"
-        
+
+        # Get month name
+        month_name = DateFormatting.get_month_name(start_date, 'full')
+
+        # Calculate optimization rate
+        optimization_rate = CostCalculations.calculate_optimization_rate(total_savings_amount, total_cost)
+
         summary_data = [
             [f"{month_name} Cost", f"${total_cost:.2f}"],
             ["Quarterly Total Cost (3 months)", f"${quarterly_total:.2f}"],
             ["Monthly Savings", f"${total_savings_amount:.2f}"],
-            ["Cost Optimization Rate", f"{(total_savings_amount/total_cost*100):.1f}%" if total_cost > 0 else "N/A"],
+            ["Cost Optimization Rate", f"{optimization_rate:.1f}%" if total_cost > 0 else "N/A"],
             ["Report Period", f"{(cost_data['period']['end'] - cost_data['period']['start']).days} days" if cost_data.get('period') else "N/A"]
         ]
         
@@ -215,9 +228,9 @@ class PDFReportGenerator:
         ]
         
         for source, amount in savings_items:
-            # Always show Savings Plans and Credit Savings, show others only if amount > 0
-            if amount > 0 or source in ["Savings Plans", "Credit Savings"]:
-                percentage = (amount / total_amount * 100) if total_amount > 0 else 0
+            # Use shared helper to determine if item should be displayed
+            if SavingsHelpers.should_display_savings_item(source, amount):
+                percentage = SavingsHelpers.calculate_savings_percentage(amount, total_amount)
                 savings_data.append([source, f"${amount:.2f}", f"{percentage:.1f}%"])
         
         # Add total row
@@ -293,14 +306,7 @@ class PDFReportGenerator:
     
     def _get_coverage_status(self, coverage_pct: float) -> str:
         """Get coverage status based on percentage."""
-        if coverage_pct >= 90:
-            return "Excellent"
-        elif coverage_pct >= 70:
-            return "Good" 
-        elif coverage_pct >= 50:
-            return "Fair"
-        else:
-            return "Poor"
+        return StatusDetermination.get_coverage_status(coverage_pct)
     
     
     def _create_trend_analysis(self, sp_coverage_with_trend: Dict) -> List:
@@ -434,14 +440,7 @@ class PDFReportGenerator:
     
     def _get_utilization_status(self, utilization_pct: float) -> str:
         """Get utilization status based on percentage."""
-        if utilization_pct >= 90:
-            return "Excellent"
-        elif utilization_pct >= 70:
-            return "Good"
-        elif utilization_pct >= 50:
-            return "Fair"
-        else:
-            return "Poor"
+        return StatusDetermination.get_utilization_status(utilization_pct)
 
     def _create_rds_trend_analysis(self, rds_coverage_with_trend: Dict) -> List:
         """Create RDS Reserved Instance trend analysis section."""
@@ -523,17 +522,7 @@ class PDFReportGenerator:
 
     def _calculate_total_cost(self, cost_data: Dict) -> float:
         """Calculate total cost from cost data."""
-        total = 0.0
-        
-        cost_results = cost_data.get('cost_data', {}).get('ResultsByTime', [])
-        
-        for result in cost_results:
-            # With SERVICE grouping, sum across all groups
-            for group in result.get('Groups', []):
-                amount = float(group.get('Metrics', {}).get('BlendedCost', {}).get('Amount', '0'))
-                total += amount
-        
-        return total
+        return CostCalculations.calculate_total_cost(cost_data)
     
     def _create_quarterly_cost_summary(self, quarterly_costs: Dict) -> List:
         """Create quarterly cost summary section."""
@@ -577,65 +566,54 @@ class PDFReportGenerator:
         
         story.append(quarterly_table)
         story.append(Spacer(1, 15))
-        
-        # Add quarterly insights
-        avg_monthly = quarterly_total / 3 if quarterly_total > 0 else 0
+
+        # Add quarterly insights using shared utilities
+        avg_monthly = CostCalculations.calculate_quarterly_average(quarterly_total)
         story.append(Paragraph("Quarterly Insights:", self.custom_styles['SubHeader']))
         story.append(Paragraph(f"• Average monthly cost: ${avg_monthly:.2f}", self.styles['Normal']))
-        story.append(Paragraph(f"• Quarterly spending trend: {self._get_cost_trend(month_minus_two, month_minus_one, selected_month)}", self.styles['Normal']))
+        trend = TrendAnalysis.get_cost_trend(month_minus_two, month_minus_one, selected_month)
+        story.append(Paragraph(f"• Quarterly spending trend: {trend}", self.styles['Normal']))
         
         story.append(Spacer(1, 20))
         return story
     
     def _get_cost_trend(self, oldest: float, middle: float, newest: float) -> str:
         """Analyze cost trend over three months."""
-        if oldest == 0 and middle == 0 and newest == 0:
-            return "No data available"
-        
-        if oldest > 0 and middle > 0 and newest > 0:
-            overall_change = ((newest - oldest) / oldest) * 100
-            
-            if overall_change > 5:
-                return f"Increasing ({overall_change:+.1f}% quarterly growth)"
-            elif overall_change < -5:
-                return f"Decreasing ({overall_change:+.1f}% quarterly decline)"
-            else:
-                return f"Stable ({overall_change:+.1f}% quarterly change)"
-        else:
-            return "Insufficient data for trend analysis"
+        return TrendAnalysis.get_cost_trend(oldest, middle, newest)
     
     def _create_monthly_comparison(self, cost_data: Dict, quarterly_costs: Dict, start_date: datetime = None) -> List:
         """Create monthly cost comparison section."""
         story = []
         
-        # Get month names
-        current_month = start_date.strftime('%B %Y') if start_date else "Selected Month"
-        previous_month = (start_date - relativedelta(months=1)).strftime('%B %Y') if start_date else "Previous Month"
-        
+        # Get month names using shared utility
+        current_month = DateFormatting.get_month_name(start_date, 'full')
+        previous_month = DateFormatting.get_previous_month_name(start_date, 'full')
+
         story.append(Paragraph(f"{current_month} Cost vs {previous_month}", self.custom_styles['SectionHeader']))
-        
+
         if not quarterly_costs:
             story.append(Paragraph("No monthly comparison data available.", self.styles['Normal']))
             story.append(Spacer(1, 20))
             return story
-        
+
         selected_month_cost = quarterly_costs.get('selected_month_cost', 0.0)
         month_minus_one_cost = quarterly_costs.get('month_minus_one_cost', 0.0)
-        
-        # Calculate month-over-month change
-        mom_change = 0.0
-        mom_percentage = 0.0
-        if month_minus_one_cost > 0:
-            mom_change = selected_month_cost - month_minus_one_cost
-            mom_percentage = (mom_change / month_minus_one_cost) * 100
-        
+
+        # Calculate month-over-month change using shared utility
+        mom_change, mom_percentage = CostCalculations.calculate_mom_change(
+            selected_month_cost, month_minus_one_cost
+        )
+
+        # Get trend direction
+        trend = TrendAnalysis.get_trend_direction_simple(selected_month_cost, month_minus_one_cost)
+
         comparison_data = [
             ["Metric", "Value"],
             [f"{current_month} Cost", f"${selected_month_cost:.2f}"],
             [f"{previous_month} Cost", f"${month_minus_one_cost:.2f}"],
             ["Month-over-Month Change", f"${mom_change:.2f}"],
             ["Change Percentage", f"{mom_percentage:+.1f}%"],
-            ["Trend", "Increasing" if mom_change > 0 else "Decreasing" if mom_change < 0 else "Stable"]
+            ["Trend", trend]
         ]
         
         comparison_table = Table(comparison_data, colWidths=[2.5*inch, 2*inch])

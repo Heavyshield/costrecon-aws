@@ -43,7 +43,15 @@ class BudgetMixin:
             for budget in budgets_response.get('Budgets', []):
                 budget_anomalies['total_budgets_checked'] += 1
                 budget_name = budget.get('BudgetName', 'Unknown')
-                
+                time_unit = budget.get('TimeUnit', 'MONTHLY')
+
+                # Skip annual budgets as they don't support custom time periods
+                if time_unit == 'ANNUALLY':
+                    budget_anomalies['errors'].append(
+                        f"Budget '{budget_name}': Annual budget found - analysis not available for custom time periods"
+                    )
+                    continue
+
                 try:
                     # Get budget performance (actual and forecasted costs)
                     performance_response = self.budgets_client.describe_budget_performance_history(
